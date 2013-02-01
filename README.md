@@ -1,4 +1,4 @@
-Mongo Tomcat Session Manager
+Tomcat Dynamo Session Manager
 ============================
 
 Overview
