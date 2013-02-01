@@ -18,51 +18,56 @@
  *
  **********************************************************************************************************************/
 
-package com.dawsonsystems.session;
+package net.energyhub.session;
 
+import com.amazonaws.services.dynamodb.model.AttributeValue;
 import org.apache.catalina.Manager;
 import org.apache.catalina.session.StandardSession;
 
 import java.util.logging.Logger;
 
-public class MongoSession extends StandardSession {
-  private static Logger log = Logger.getLogger("MongoManager");
-  private boolean isValid = true;
+public class DynamoSession extends StandardSession {
+    private static Logger log = Logger.getLogger("DynamoManager");
+    private boolean isValid = true;
 
-  public MongoSession(Manager manager) {
-    super(manager);
-  }
-
-  @Override
-  protected boolean isValidInternal() {
-    return isValid;
-  }
-
-  @Override
-  public boolean isValid() {
-    return isValidInternal();
-  }
-
-  @Override
-  public void setValid(boolean isValid) {
-    this.isValid = isValid;
-    if (!isValid) {
-      String keys[] = keys();
-      for (String key : keys) {
-        removeAttributeInternal(key, false);
-      }
-      getManager().remove(this);
-
+    public DynamoSession(Manager manager) {
+        super(manager);
     }
-  }
 
-  @Override
-  public void invalidate() {
-    setValid(false);
-  }
+    @Override
+    protected boolean isValidInternal() {
+        return isValid;
+    }
 
-  @Override
-  public void setId(String id) {
-    this.id = id;
-  }
+    @Override
+    public boolean isValid() {
+        return isValidInternal();
+    }
+
+    @Override
+    public void setValid(boolean isValid) {
+        this.isValid = isValid;
+        if (!isValid) {
+            String keys[] = keys();
+            for (String key : keys) {
+                removeAttributeInternal(key, false);
+            }
+            getManager().remove(this);
+
+        }
+    }
+
+    @Override
+    public void invalidate() {
+        setValid(false);
+    }
+
+    @Override
+    public void setId(String id) {
+        this.id = id;
+    }
+
+    public AttributeValue getAttributeValue() {
+        return new AttributeValue().withS(this.id);
+    }
 }

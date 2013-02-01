@@ -25,41 +25,49 @@ import org.apache.catalina.util.CustomObjectInputStream;
 
 import javax.servlet.http.HttpSession;
 import java.io.*;
+import java.nio.ByteBuffer;
+import java.util.zip.GZIPInputStream;
+import java.util.zip.GZIPOutputStream;
 
 
 public class JavaSerializer implements Serializer {
-  private ClassLoader loader;
+    private ClassLoader loader;
 
-  @Override
-  public void setClassLoader(ClassLoader loader) {
-    this.loader = loader;
-  }
+    @Override
+    public void setClassLoader(ClassLoader loader) {
+        this.loader = loader;
+    }
 
-  @Override
-  public byte[] serializeFrom(HttpSession session) throws IOException {
+    @Override
+    public ByteBuffer serializeFrom(HttpSession session) throws IOException {
 
-    StandardSession standardSession = (StandardSession) session;
-    ByteArrayOutputStream bos = new ByteArrayOutputStream();
-    ObjectOutputStream oos = new ObjectOutputStream(new BufferedOutputStream(bos));
-    oos.writeLong(standardSession.getCreationTime());
-    standardSession.writeObjectData(oos);
+        StandardSession standardSession = (StandardSession) session;
+        ByteArrayOutputStream bos = new ByteArrayOutputStream();
+        GZIPOutputStream gzos = new GZIPOutputStream(new BufferedOutputStream(bos));
+        ObjectOutputStream oos = new ObjectOutputStream(gzos);
+        oos.writeLong(standardSession.getCreationTime());
+        standardSession.writeObjectData(oos);
 
-    oos.close();
+        oos.close();
+        gzos.finish();
+        gzos.close();
 
-    return bos.toByteArray();
-  }
+        return ByteBuffer.wrap(bos.toByteArray());
+    }
 
-  @Override
-  public HttpSession deserializeInto(byte[] data, HttpSession session) throws IOException, ClassNotFoundException {
+    @Override
+    public HttpSession deserializeInto(ByteBuffer data, HttpSession session) throws IOException, ClassNotFoundException {
 
-    StandardSession standardSession = (StandardSession) session;
+        StandardSession standardSession = (StandardSession) session;
 
-    BufferedInputStream bis = new BufferedInputStream(new ByteArrayInputStream(data));
+        BufferedInputStream bis = new BufferedInputStream(new ByteArrayInputStream(data.array()));
 
-    ObjectInputStream ois = new CustomObjectInputStream(bis, loader);
-    standardSession.setCreationTime(ois.readLong());
-    standardSession.readObjectData(ois);
+        GZIPInputStream gzis = new GZIPInputStream(bis);
 
-    return session;
-  }
+        ObjectInputStream ois = new CustomObjectInputStream(gzis, loader);
+        standardSession.setCreationTime(ois.readLong());
+        standardSession.readObjectData(ois);
+
+        return session;
+    }
 }

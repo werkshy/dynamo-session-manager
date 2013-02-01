@@ -22,11 +22,12 @@ package com.dawsonsystems.session;
 
 import javax.servlet.http.HttpSession;
 import java.io.IOException;
+import java.nio.ByteBuffer;
 
 public interface Serializer {
-  void setClassLoader(ClassLoader loader);
+    void setClassLoader(ClassLoader loader);
 
-  byte[] serializeFrom(HttpSession session) throws IOException;
+    ByteBuffer serializeFrom(HttpSession session) throws IOException;
 
-  HttpSession deserializeInto(byte[] data, HttpSession session) throws IOException, ClassNotFoundException;
+    HttpSession deserializeInto(ByteBuffer data, HttpSession session) throws IOException, ClassNotFoundException;
 }
