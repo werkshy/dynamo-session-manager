@@ -424,9 +424,13 @@ public class DynamoManager implements Manager, Lifecycle {
                 .withProvisionedThroughput(throughput);
         getDynamo().createTable(createRequest);
         // TODO: exception handling from create requests
+        // either catch ResourceInUseException or superclass,
+        // AmazonServiceException for creating existing table
 
         // TODO waitForTableToBecomeAvailable
         // https://github.com/amazonwebservices/aws-sdk-for-java/blob/master/src/samples/AmazonDynamoDB/AmazonDynamoDBSample.java
+        // do a sample write and then read back of a sample key (named
+        // "sample?") before declaring things ok
     }
 
     /**
@@ -676,6 +680,7 @@ public class DynamoManager implements Manager, Lifecycle {
         }
 
         // TODO: check to see if we need to remove an expired table
+        // can probably do this asynchronously later
         Set<String> tablesToKeep = new HashSet<String>(Arrays.asList(currentTableName_temp, previousTableName_temp,
                 nextTableName));
         Set<String> tablesToDelete = new HashSet<String>();
