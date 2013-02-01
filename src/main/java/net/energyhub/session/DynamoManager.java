@@ -190,7 +190,7 @@ public class DynamoManager implements Manager, Lifecycle {
 
     @Override
     public void backgroundProcess() {
-        checkTableRotation();
+        checkTableRotation(System.currentTimeMillis()/1000);
     }
 
     public void addLifecycleListener(LifecycleListener lifecycleListener) {
@@ -427,10 +427,31 @@ public class DynamoManager implements Manager, Lifecycle {
         // either catch ResourceInUseException or superclass,
         // AmazonServiceException for creating existing table
 
-        // TODO waitForTableToBecomeAvailable
-        // https://github.com/amazonwebservices/aws-sdk-for-java/blob/master/src/samples/AmazonDynamoDB/AmazonDynamoDBSample.java
-        // do a sample write and then read back of a sample key (named
-        // "sample?") before declaring things ok
+        // waitForTableToBecomeAvailable
+        String readBack = null;
+        String testData = "test";
+        String testId = "test_id";
+        while (!testData.equals(readBack)) {
+            // sample write
+            Map<String, AttributeValue> dbData = new HashMap<String, AttributeValue>();
+            dbData.put("id", new AttributeValue().withS(testId));
+            dbData.put("data", new AttributeValue().withS(testData));
+            dbData.put("lastmodified", new AttributeValue().withN(Long.toString(System.currentTimeMillis(), 10)));
+
+            PutItemRequest putRequest = new PutItemRequest().withTableName(tableName).withItem(dbData);
+            PutItemResult putResult = getDynamo().putItem(putRequest);
+
+            // sample read
+            GetItemRequest request = new GetItemRequest()
+                .withTableName("test_table")
+                .withKey(new Key().withHashKeyElement(new AttributeValue().withS(testId)));
+            request = request.withConsistentRead(true);
+
+            GetItemResult getResult = getDynamo().getItem(request);
+            if (getResult != null) {
+                readBack = getResult.getItem().get("data").getS();
+            }
+        }
     }
 
     /**
@@ -640,17 +661,14 @@ public class DynamoManager implements Manager, Lifecycle {
             rotated = true; // triggers the read-only modification on the previous table the first time it is moved.
         }
         return rotated;
-
-
     }
 
     /**
      * Check to see if we need to rotate the tables or delete an expired table.
      */
-    public synchronized void checkTableRotation() {
+    public synchronized void checkTableRotation(long nowSeconds) {
         // check to see if we need to create a new table (future table)
         Set<String> tableNames = new HashSet(getDynamo().listTables().getTableNames());
-        long nowSeconds = System.currentTimeMillis()/1000;
         long timeOfNextTable = nowSeconds + getMaxInactiveInterval() - nowSeconds % getMaxInactiveInterval();
         String nextTableName = getNextTableName(nowSeconds);
         if (timeOfNextTable <= nowSeconds + CREATE_TABLE_HEADROOM_SECONDS && !tableNames.contains(nextTableName)) {
@@ -725,7 +743,8 @@ public class DynamoManager implements Manager, Lifecycle {
     private void initDbConnection() throws LifecycleException {
         try {
             getDynamo();
-            checkTableRotation();
+            checkTableRotation(System.currentTimeMillis()/1000);
+
             log.info("Connected to Dynamo for session storage. Session live time = "
                     + (getMaxInactiveInterval()) + "s");
         } catch (Exception e) {
