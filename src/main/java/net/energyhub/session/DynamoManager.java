@@ -454,7 +454,7 @@ public class DynamoManager implements Manager, Lifecycle {
         return throughput;
     }
 
-    private AmazonDynamoDB getDynamo() {
+    protected AmazonDynamoDB getDynamo() {
         if (this.dynamo != null) {
             return this.dynamo;
         }
