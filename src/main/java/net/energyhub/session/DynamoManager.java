@@ -253,16 +253,15 @@ public class DynamoManager implements Manager, Lifecycle {
         return session;
     }
 
+    /**
+     * There is no good way to return a list of sessions from dynamo without scanning the table.
+     * It is a design goal of this project to avoid scanning the table, so this method just returns
+     * an empty array.
+     * @return
+     */
     public org.apache.catalina.Session[] findSessions() {
-        try {
-            List<Session> sessions = new ArrayList<Session>();
-            for (String sessionId : keys()) {
-                sessions.add(loadSession(sessionId));
-            }
-            return sessions.toArray(new Session[sessions.size()]);
-        } catch (IOException ex) {
-            throw new RuntimeException(ex);
-        }
+        org.apache.catalina.Session[] sessions = new Session[]{};
+        return sessions;
     }
 
     protected org.apache.catalina.session.StandardSession getNewSession() {
@@ -474,33 +473,6 @@ public class DynamoManager implements Manager, Lifecycle {
         QueryResult result = getDynamo().query(new QueryRequest().withTableName(currentTableName).withCount(true));
         return result.getCount();
     }
-
-    /**
-     * This is required by the manager interface, but would be a bad thing to run on dynamo
-     * @return
-     * @throws IOException
-     */
-    public String[] keys() throws IOException {
-        log.info("Retrieving all keys from Dynamo");
-        ScanRequest scanRequest = new ScanRequest()
-                .withTableName(currentTableName)
-                .withAttributesToGet("id");
-
-        // TODO: do this in batches using withLimit() and withExclusiveStartKey()
-        ScanResult result = getDynamo().scan(scanRequest);
-        log.info("Found " + result.getCount() + " keys and used " + result.getConsumedCapacityUnits() + " capacity units");
-
-        String[] ret = new String[result.getCount()];
-        int i = 0;
-        for (Map<String, AttributeValue> item : result.getItems()) {
-            String id = item.get("id").getS();
-            ret[i] = id;
-            i++;
-        }
-
-        return ret;
-    }
-
 
     public Session loadSession(String id) throws IOException {
 
