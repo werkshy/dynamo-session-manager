@@ -23,6 +23,7 @@
 
 package net.energyhub.session;
 
+import com.amazonaws.AmazonClientException;
 import com.amazonaws.auth.BasicAWSCredentials;
 import com.amazonaws.services.dynamodb.AmazonDynamoDB;
 import com.amazonaws.services.dynamodb.AmazonDynamoDBClient;
@@ -431,25 +432,52 @@ public class DynamoManager implements Manager, Lifecycle {
         String readBack = null;
         String testData = "test";
         String testId = "test_id";
-        while (!testData.equals(readBack)) {
+        for (int i = 5; i > 0; i--) {
+
             // sample write
             Map<String, AttributeValue> dbData = new HashMap<String, AttributeValue>();
             dbData.put("id", new AttributeValue().withS(testId));
             dbData.put("data", new AttributeValue().withS(testData));
-            dbData.put("lastmodified", new AttributeValue().withN(Long.toString(System.currentTimeMillis(), 10)));
+            dbData.put("lastmodified", new AttributeValue()
+                       .withN(Long.toString(System.currentTimeMillis(), 10)));
 
-            PutItemRequest putRequest = new PutItemRequest().withTableName(tableName).withItem(dbData);
-            PutItemResult putResult = getDynamo().putItem(putRequest);
+            PutItemRequest putRequest = new PutItemRequest()
+                .withTableName(tableName)
+                .withItem(dbData);
+            try {
+                PutItemResult putResult = getDynamo().putItem(putRequest);
+            } catch (AmazonClientException e) {
+                log.info("Test put to " + tableName + " failed, wait and try " +
+                         i + " more times");
+            }
 
             // sample read
             GetItemRequest request = new GetItemRequest()
-                .withTableName("test_table")
+                .withTableName(tableName)
                 .withKey(new Key().withHashKeyElement(new AttributeValue().withS(testId)));
             request = request.withConsistentRead(true);
 
-            GetItemResult getResult = getDynamo().getItem(request);
-            if (getResult != null) {
+            GetItemResult getResult = null;
+            try {
+                getResult = getDynamo().getItem(request);
+            } catch (AmazonClientException e) {
+                log.info("Test get from " + tableName + " failed, wait and try " +
+                         i + " more times");
+            }
+            if (getResult != null &&
+                getResult.getItem() != null &&
+                getResult.getItem().get("data") != null) {
                 readBack = getResult.getItem().get("data").getS();
+            }
+
+            if (testData.equals(readBack)) {
+                break;
+            }
+
+            // TODO: is sleep the right thing to do here?  how do we wait to retry?
+            try {
+                Thread.sleep(100);
+            } catch (InterruptedException e) {
             }
         }
     }
@@ -460,6 +488,8 @@ public class DynamoManager implements Manager, Lifecycle {
      * @return
      */
     protected ProvisionedThroughput getProvisionedThroughputObject(boolean readOnly) {
+        // TODO: bump up requestsPerSecond if we start seeing
+        // ProvisionedThroughputExceededExceptions
         long readUnit = requestsPerSecond*sessionSize;
         // by default, we need the same write throughput as read throughput (one read, one write per request).
         long writeUnit = readUnit;

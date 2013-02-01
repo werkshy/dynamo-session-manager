@@ -67,5 +67,36 @@ public class DynamoManagerTest {
         assertEquals("test", result.getItem().get("data").getS());
     }
 
+    @Test
+    public void rotation() {
+        long startSeconds = 0;
 
+        List<String> tables = client.listTables().getTableNames();
+        assertTrue(tables.isEmpty());
+
+        // just starting, create current
+        manager.checkTableRotation(startSeconds);
+        tables = client.listTables().getTableNames();
+        assertEquals(1, tables.size());
+
+        // current + future
+        manager.checkTableRotation(startSeconds + 30);
+        tables = client.listTables().getTableNames();
+        assertEquals(2, tables.size());
+
+        // previous + current
+        manager.checkTableRotation(startSeconds + 60);
+        tables = client.listTables().getTableNames();
+        assertEquals(2, tables.size());
+
+        // previous + current + future
+        manager.checkTableRotation(startSeconds + 90);
+        tables = client.listTables().getTableNames();
+        assertEquals(3, tables.size());
+
+        // previous + current
+        manager.checkTableRotation(startSeconds + 120);
+        tables = client.listTables().getTableNames();
+        assertEquals(2, tables.size());
+    }
 }
