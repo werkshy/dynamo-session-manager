@@ -34,7 +34,7 @@
         <dependency>
           <groupId>com.michelboudreau</groupId>
           <artifactId>alternator</artifactId>
-          <version>0.2.11-SNAPSHOT</version>
+          <version>0.3.5</version>
         </dependency>
         <dependency>
             <groupId>junit</groupId>
