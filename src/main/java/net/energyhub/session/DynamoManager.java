@@ -494,7 +494,7 @@ public class DynamoManager implements Manager, Lifecycle {
         // by default, we need the same write throughput as read throughput (one read, one write per request).
         long writeUnit = readUnit;
         if (readOnly) {
-            writeUnit = 0l;
+            writeUnit = 1L;   // minimun is 1 unit, and we won't be writing to old tables.
         }
         // eventual consistency reads are two-for-the-price-of-one
         if (eventualConsistency) {
@@ -720,8 +720,8 @@ public class DynamoManager implements Manager, Lifecycle {
         boolean rotated = rotateTables(tableNames, currentTableName_temp, previousTableName_temp);
         if (rotated) {
             // after rotation, the old table can be set to read-only to save $$$
-            log.info("Reprovisioning the previous table to read-only: " + previousTableName);
             ProvisionedThroughput throughput = getProvisionedThroughputObject(true);
+            log.info("Reprovisioning the previous table to read-only: " + previousTableName + ", " + throughput);
             UpdateTableRequest updateTableRequest = new UpdateTableRequest().withTableName(previousTableName)
                     .withProvisionedThroughput(throughput);
             getDynamo().updateTable(updateTableRequest);
