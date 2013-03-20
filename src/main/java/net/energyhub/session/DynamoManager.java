@@ -23,6 +23,7 @@
 
 package net.energyhub.session;
 
+import com.amazonaws.AmazonClientException;
 import com.amazonaws.auth.BasicAWSCredentials;
 import com.amazonaws.services.dynamodb.AmazonDynamoDB;
 import com.amazonaws.services.dynamodb.AmazonDynamoDBClient;
@@ -190,7 +191,7 @@ public class DynamoManager implements Manager, Lifecycle {
 
     @Override
     public void backgroundProcess() {
-        checkTableRotation();
+        checkTableRotation(System.currentTimeMillis()/1000);
     }
 
     public void addLifecycleListener(LifecycleListener lifecycleListener) {
@@ -424,9 +425,61 @@ public class DynamoManager implements Manager, Lifecycle {
                 .withProvisionedThroughput(throughput);
         getDynamo().createTable(createRequest);
         // TODO: exception handling from create requests
+        // either catch ResourceInUseException or superclass,
+        // AmazonServiceException for creating existing table
 
-        // TODO waitForTableToBecomeAvailable
-        // https://github.com/amazonwebservices/aws-sdk-for-java/blob/master/src/samples/AmazonDynamoDB/AmazonDynamoDBSample.java
+        // waitForTableToBecomeAvailable
+        String readBack = null;
+        String testData = "test";
+        String testId = "test_id";
+        for (int i = 5; i > 0; i--) {
+
+            // sample write
+            Map<String, AttributeValue> dbData = new HashMap<String, AttributeValue>();
+            dbData.put("id", new AttributeValue().withS(testId));
+            dbData.put("data", new AttributeValue().withS(testData));
+            dbData.put("lastmodified", new AttributeValue()
+                       .withN(Long.toString(System.currentTimeMillis(), 10)));
+
+            PutItemRequest putRequest = new PutItemRequest()
+                .withTableName(tableName)
+                .withItem(dbData);
+            try {
+                PutItemResult putResult = getDynamo().putItem(putRequest);
+            } catch (AmazonClientException e) {
+                log.info("Test put to " + tableName + " failed, wait and try " +
+                         i + " more times");
+            }
+
+            // sample read
+            GetItemRequest request = new GetItemRequest()
+                .withTableName(tableName)
+                .withKey(new Key().withHashKeyElement(new AttributeValue().withS(testId)));
+            request = request.withConsistentRead(true);
+
+            GetItemResult getResult = null;
+            try {
+                getResult = getDynamo().getItem(request);
+            } catch (AmazonClientException e) {
+                log.info("Test get from " + tableName + " failed, wait and try " +
+                         i + " more times");
+            }
+            if (getResult != null &&
+                getResult.getItem() != null &&
+                getResult.getItem().get("data") != null) {
+                readBack = getResult.getItem().get("data").getS();
+            }
+
+            if (testData.equals(readBack)) {
+                break;
+            }
+
+            // TODO: is sleep the right thing to do here?  how do we wait to retry?
+            try {
+                Thread.sleep(100);
+            } catch (InterruptedException e) {
+            }
+        }
     }
 
     /**
@@ -435,6 +488,8 @@ public class DynamoManager implements Manager, Lifecycle {
      * @return
      */
     protected ProvisionedThroughput getProvisionedThroughputObject(boolean readOnly) {
+        // TODO: bump up requestsPerSecond if we start seeing
+        // ProvisionedThroughputExceededExceptions
         long readUnit = requestsPerSecond*sessionSize;
         // by default, we need the same write throughput as read throughput (one read, one write per request).
         long writeUnit = readUnit;
@@ -450,7 +505,7 @@ public class DynamoManager implements Manager, Lifecycle {
         return throughput;
     }
 
-    private AmazonDynamoDB getDynamo() {
+    protected AmazonDynamoDB getDynamo() {
         if (this.dynamo != null) {
             return this.dynamo;
         }
@@ -636,17 +691,14 @@ public class DynamoManager implements Manager, Lifecycle {
             rotated = true; // triggers the read-only modification on the previous table the first time it is moved.
         }
         return rotated;
-
-
     }
 
     /**
      * Check to see if we need to rotate the tables or delete an expired table.
      */
-    public synchronized void checkTableRotation() {
+    public synchronized void checkTableRotation(long nowSeconds) {
         // check to see if we need to create a new table (future table)
         Set<String> tableNames = new HashSet(getDynamo().listTables().getTableNames());
-        long nowSeconds = System.currentTimeMillis()/1000;
         long timeOfNextTable = nowSeconds + getMaxInactiveInterval() - nowSeconds % getMaxInactiveInterval();
         String nextTableName = getNextTableName(nowSeconds);
         if (timeOfNextTable <= nowSeconds + CREATE_TABLE_HEADROOM_SECONDS && !tableNames.contains(nextTableName)) {
@@ -676,6 +728,7 @@ public class DynamoManager implements Manager, Lifecycle {
         }
 
         // TODO: check to see if we need to remove an expired table
+        // can probably do this asynchronously later
         Set<String> tablesToKeep = new HashSet<String>(Arrays.asList(currentTableName_temp, previousTableName_temp,
                 nextTableName));
         Set<String> tablesToDelete = new HashSet<String>();
@@ -720,7 +773,8 @@ public class DynamoManager implements Manager, Lifecycle {
     private void initDbConnection() throws LifecycleException {
         try {
             getDynamo();
-            checkTableRotation();
+            checkTableRotation(System.currentTimeMillis()/1000);
+
             log.info("Connected to Dynamo for session storage. Session live time = "
                     + (getMaxInactiveInterval()) + "s");
         } catch (Exception e) {
