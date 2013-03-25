@@ -61,8 +61,6 @@ Copy the dynamo-session-manager jar and the dependencies from target/lib/ into t
 (e.g. /usr/share/tomcat6/lib) and you're good to go.
 
 
-
-
 Expiration
 ----------
 
@@ -72,9 +70,9 @@ money!) and is hard to provision for. The approach taken here is to rotate the D
 they are expired. Active sessions will be read from the previous table and stored in the current table, inactive ones
 will be left in the previous table and deleted.
 
-Table A: current table, read/write
-Table B: previous table. If session not found in A, look in B. Save to A.
-Table C: expired table, will be deleted on next check.
+- Table A: current table, read/write
+- Table B: previous table. If session not found in A, look in B. Save to A.
+- Table C: expired table, will be deleted on next check.
 
 The tables are named like
    tableName + startTimestamp
@@ -82,7 +80,7 @@ The tables are named like
 The current table timestamp is (currentTime - currentTime % maxInactiveInterval).
 
 A background task creates the next table before it is required, provisions the previous table for read-only
- and deletes the expired table. We have found that table creation takes approximately 60s.
+and deletes the expired table. We have found that table creation takes approximately 60s.
 
 The table rotation should be synchronized as much as possible across different tomcat servers. In practice with Elastic
 Load Balancers (even in non-sticky mode) this is mitigated by a general stickiness of a client to a server, but we can
@@ -95,8 +93,8 @@ Provisioning
 You need to provision one read and one write unit per request, i.e. if your app has a peak throughput of 10 requests per
 second, you need 10 reads per second and 10 writes per second during normal activity.
 
-10 reads per second = 1x (block of 50 read units per second) = $0.01 / hour
-10 writes per second = 1x (block of 10 write units per second) = $0.01 / hour
+- 10 reads per second = 1x (block of 50 read units per second) = $0.01 / hour
+- 10 writes per second = 1x (block of 10 write units per second) = $0.01 / hour
 
 If your sessions are greater than 1kB, you need to multiply your provisioned units by the session size in kB.
 
