@@ -48,8 +48,7 @@ public class DynamoManager implements Manager, Lifecycle {
     protected static String awsSecretKey = "";  // Required for production environment
     protected static String dynamoEndpoint = ""; // used only for QA mock dynamo connections (not production)
     protected static String tableBaseName = "tomcat-sessions";
-    protected static String currentTableName = "";
-    protected static String previousTableName = "";
+    protected static Integer maxInactiveInterval = 3600; // default in seconds
     protected static String ignoreUri = "";
     protected static String ignoreHeader = "";
     protected static Boolean logSessionContents = false;
@@ -57,6 +56,7 @@ public class DynamoManager implements Manager, Lifecycle {
     protected static Integer sessionSize = 1; // in kB
     protected static Boolean eventualConsistency = false;
     protected AmazonDynamoDB dynamo = null;
+    protected DynamoTableRotator rotator = null;
 
     private DynamoSessionTrackerValve trackerValve;
     private ThreadLocal<StandardSession> currentSession = new ThreadLocal<StandardSession>();
@@ -66,12 +66,153 @@ public class DynamoManager implements Manager, Lifecycle {
     private String serializationStrategyClass = "com.dawsonsystems.session.JavaSerializer";
 
     private Container container;
-    private int maxInactiveInterval;
 
     private ScheduledExecutorService expiresExecutorService = null;
     private Pattern ignoreUriPattern = null;
     private Pattern ignoreHeaderPattern = null;
-    private static final long CREATE_TABLE_HEADROOM_SECONDS = 30;
+
+    /////////////////////////////////////////////////////////////////
+    //   Getters and Setters for Implementation Properties
+    /////////////////////////////////////////////////////////////////
+    public static String getDynamoEndpoint() {
+        return dynamoEndpoint;
+    }
+
+    public static void setDynamoEndpoint(String endpoint) {
+        DynamoManager.dynamoEndpoint = endpoint;
+    }
+
+    public static String getTableBaseName() {
+        return tableBaseName;
+    }
+
+    public static void setTableBaseName(String tableBaseName) {
+        DynamoManager.tableBaseName = tableBaseName;
+    }
+
+    public static String getAwsAccessKey() {
+        return awsAccessKey;
+    }
+
+    public static void setAwsAccessKey(String awsAccessKey) {
+        DynamoManager.awsAccessKey = awsAccessKey;
+    }
+
+    public static String getAwsSecretKey() {
+        return awsSecretKey;
+    }
+
+    public static void setAwsSecretKey(String awsSecretKey) {
+        DynamoManager.awsSecretKey = awsSecretKey;
+    }
+
+
+    public static String getIgnoreHeader() {
+        return ignoreHeader;
+    }
+
+    public static void setIgnoreHeader(String ignoreHeader) {
+        DynamoManager.ignoreHeader = ignoreHeader;
+    }
+
+    public static String getIgnoreUri() {
+        return ignoreUri;
+    }
+
+    public static void setIgnoreUri(String ignoreUri) {
+        DynamoManager.ignoreUri = ignoreUri;
+    }
+
+    public static Boolean getLogSessionContents() {
+        return logSessionContents;
+    }
+
+    public static void setLogSessionContents(Boolean logSessionContents) {
+        DynamoManager.logSessionContents = logSessionContents;
+    }
+
+    public static Integer getRequestsPerSecond() {
+        return requestsPerSecond;
+    }
+
+    public static void setRequestsPerSecond(Integer requestsPerSecond) {
+        DynamoManager.requestsPerSecond = requestsPerSecond;
+    }
+
+    public static Integer getSessionSize() {
+        return sessionSize;
+    }
+
+    public static void setSessionSize(Integer sessionSize) {
+        DynamoManager.sessionSize = sessionSize;
+    }
+
+    public static Boolean getEventualConsistency() {
+        return eventualConsistency;
+    }
+
+    public static void setEventualConsistency(Boolean eventualConsistency) {
+        DynamoManager.eventualConsistency = eventualConsistency;
+    }
+
+    ////////////////////////////////////////////////////////////////////////////////
+    //   Implement methods of Lifecycle
+    ////////////////////////////////////////////////////////////////////////////////
+
+    public void addLifecycleListener(LifecycleListener lifecycleListener) {
+    }
+
+    public LifecycleListener[] findLifecycleListeners() {
+        return new LifecycleListener[0];  //To change body of implemented methods use File | Settings | File Templates.
+    }
+
+    public void removeLifecycleListener(LifecycleListener lifecycleListener) {
+    }
+
+    public void start() throws LifecycleException {
+        log.info("Starting Dynamo Session Manager in container: " + this.getContainer().getName());
+        for (Valve valve : getContainer().getPipeline().getValves()) {
+            if (valve instanceof DynamoSessionTrackerValve) {
+                trackerValve = (DynamoSessionTrackerValve) valve;
+                trackerValve.setDynamoManager(this);
+                log.info("Attached to Dynamo Tracker Valve");
+                break;
+            }
+        }
+        try {
+            initSerializer();
+        } catch (ClassNotFoundException e) {
+            log.log(Level.SEVERE, "Unable to load serializer", e);
+            throw new LifecycleException(e);
+        } catch (InstantiationException e) {
+            log.log(Level.SEVERE, "Unable to load serializer", e);
+            throw new LifecycleException(e);
+        } catch (IllegalAccessException e) {
+            log.log(Level.SEVERE, "Unable to load serializer", e);
+            throw new LifecycleException(e);
+        }
+        log.info("Will expire sessions after " + getMaxInactiveInterval() + " ms");
+        initDbConnection();
+
+        if (!getIgnoreUri().isEmpty()) {
+            log.info("Setting URI ignore regex to: " + getIgnoreUri());
+            this.ignoreUriPattern = Pattern.compile(getIgnoreUri());
+        }
+        if (!getIgnoreHeader().isEmpty()) {
+            log.info("Setting header ignore regex to: " + getIgnoreHeader());
+            this.ignoreHeaderPattern = Pattern.compile(getIgnoreHeader());
+        }
+        log.info("Finished starting manager");
+    }
+
+    public void stop() throws LifecycleException {
+        getDynamo().shutdown();
+    }
+
+
+    //////////////////////////////////////////////////////////////////////////////////
+    // Implementation of Manager
+    //////////////////////////////////////////////////////////////////////////////////
 
     @Override
     public Container getContainer() {
@@ -190,21 +331,6 @@ public class DynamoManager implements Manager, Lifecycle {
     }
 
     @Override
-    public void backgroundProcess() {
-        checkTableRotation(System.currentTimeMillis()/1000);
-    }
-
-    public void addLifecycleListener(LifecycleListener lifecycleListener) {
-    }
-
-    public LifecycleListener[] findLifecycleListeners() {
-        return new LifecycleListener[0];  //To change body of implemented methods use File | Settings | File Templates.
-    }
-
-    public void removeLifecycleListener(LifecycleListener lifecycleListener) {
-    }
-
-    @Override
     public void add(Session session) {
         try {
             save(session);
@@ -217,6 +343,19 @@ public class DynamoManager implements Manager, Lifecycle {
     public void addPropertyChangeListener(PropertyChangeListener propertyChangeListener) {
         //To change body of implemented methods use File | Settings | File Templates.
     }
+
+    @Override
+    public void removePropertyChangeListener(PropertyChangeListener propertyChangeListener) {
+        //To change body of implemented methods use File | Settings | File Templates.
+    }
+
+    @Override
+    public void backgroundProcess() {
+        if (rotator != null) {
+            rotator.process();
+        }
+    }
+
 
     @Override
     public void changeSessionId(Session session) {
@@ -265,271 +404,17 @@ public class DynamoManager implements Manager, Lifecycle {
         return sessions;
     }
 
-    protected org.apache.catalina.session.StandardSession getNewSession() {
-        log.fine("getNewSession()");
-        return (DynamoSession) createEmptySession();
-    }
-
-    public void start() throws LifecycleException {
-        for (Valve valve : getContainer().getPipeline().getValves()) {
-            if (valve instanceof DynamoSessionTrackerValve) {
-                trackerValve = (DynamoSessionTrackerValve) valve;
-                trackerValve.setDynamoManager(this);
-                log.info("Attached to Dynamo Tracker Valve");
-                break;
-            }
-        }
-        try {
-            initSerializer();
-        } catch (ClassNotFoundException e) {
-            log.log(Level.SEVERE, "Unable to load serializer", e);
-            throw new LifecycleException(e);
-        } catch (InstantiationException e) {
-            log.log(Level.SEVERE, "Unable to load serializer", e);
-            throw new LifecycleException(e);
-        } catch (IllegalAccessException e) {
-            log.log(Level.SEVERE, "Unable to load serializer", e);
-            throw new LifecycleException(e);
-        }
-        log.info("Will expire sessions after " + getMaxInactiveInterval() + " ms");
-        initDbConnection();
-
-        if (!getIgnoreUri().isEmpty()) {
-            log.info("Setting URI ignore regex to: " + getIgnoreUri());
-            this.ignoreUriPattern = Pattern.compile(getIgnoreUri());
-        }
-        if (!getIgnoreHeader().isEmpty()) {
-            log.info("Setting header ignore regex to: " + getIgnoreHeader());
-            this.ignoreHeaderPattern = Pattern.compile(getIgnoreHeader());
-        }
-    }
-
-    public void stop() throws LifecycleException {
-        getDynamo().shutdown();
-    }
-
     public Session findSession(String id) throws IOException {
         return loadSession(id);
     }
 
-    public static String getDynamoEndpoint() {
-        return dynamoEndpoint;
-    }
-
-    public static void setDynamoEndpoint(String endpoint) {
-        DynamoManager.dynamoEndpoint = endpoint;
-    }
-
-    public static String getTableBaseName() {
-        return tableBaseName;
-    }
-
-    public static void setTableiBaseName(String tableBaseName) {
-        DynamoManager.tableBaseName = tableBaseName;
-    }
-
-    public static String getAwsAccessKey() {
-        return awsAccessKey;
-    }
-
-    public static void setAwsAccessKey(String awsAccessKey) {
-        DynamoManager.awsAccessKey = awsAccessKey;
-    }
-
-    public static String getAwsSecretKey() {
-        return awsSecretKey;
-    }
-
-    public static void setAwsSecretKey(String awsSecretKey) {
-        DynamoManager.awsSecretKey = awsSecretKey;
-    }
-
-
-    public static String getIgnoreHeader() {
-        return ignoreHeader;
-    }
-
-    public static void setIgnoreHeader(String ignoreHeader) {
-        DynamoManager.ignoreHeader = ignoreHeader;
-    }
-
-    public static String getIgnoreUri() {
-        return ignoreUri;
-    }
-
-    public static void setIgnoreUri(String ignoreUri) {
-        DynamoManager.ignoreUri = ignoreUri;
-    }
-
-    public static Boolean getLogSessionContents() {
-        return logSessionContents;
-    }
-
-    public static void setLogSessionContents(Boolean logSessionContents) {
-        DynamoManager.logSessionContents = logSessionContents;
-    }
-
-    public static Integer getRequestsPerSecond() {
-        return requestsPerSecond;
-    }
-
-    public static void setRequestsPerSecond(Integer requestsPerSecond) {
-        DynamoManager.requestsPerSecond = requestsPerSecond;
-    }
-
-    public static Integer getSessionSize() {
-        return sessionSize;
-    }
-
-    public static void setSessionSize(Integer sessionSize) {
-        DynamoManager.sessionSize = sessionSize;
-    }
-
-    public static Boolean getEventualConsistency() {
-        return eventualConsistency;
-    }
-
-    public static void setEventualConsistency(Boolean eventualConsistency) {
-        DynamoManager.eventualConsistency = eventualConsistency;
-    }
-
-    public void clear() throws IOException {
-        // TODO check result
-        for (String tableName : getDynamo().listTables().getTableNames()) {
-            if (tableName.startsWith(tableBaseName)) {
-                log.info("Deleting table: " + tableName);
-                getDynamo().deleteTable(new DeleteTableRequest(tableName));
-            }
-        }
-
-        long nowSeconds = System.currentTimeMillis()/1000;
-        ensureTable(getCurrentTableName(nowSeconds));
-    }
-
-    public void ensureTable(String tableName) {
-        List<String> tableNames = getDynamo().listTables().getTableNames();
-        if (tableNames.contains(tableName)) {
-            // TODO verify schema
-            log.info("Found existing table " + tableName);
-            return;
-        }
-        log.info("Creating table " + tableName);
-        // define schema: primary string index on id
-        KeySchemaElement primary = new KeySchemaElement().withAttributeName("id").withAttributeType(ScalarAttributeType.S);
-        KeySchema schema = new KeySchema()
-                .withHashKeyElement(primary);
-
-        ProvisionedThroughput throughput = getProvisionedThroughputObject(false);
-
-        CreateTableRequest createRequest = new CreateTableRequest(tableName, schema)
-                .withProvisionedThroughput(throughput);
-        getDynamo().createTable(createRequest);
-        // TODO: exception handling from create requests
-        // either catch ResourceInUseException or superclass,
-        // AmazonServiceException for creating existing table
-
-        // waitForTableToBecomeAvailable
-        String readBack = null;
-        String testData = "test";
-        String testId = "test_id";
-        for (int i = 5; i > 0; i--) {
-
-            // sample write
-            Map<String, AttributeValue> dbData = new HashMap<String, AttributeValue>();
-            dbData.put("id", new AttributeValue().withS(testId));
-            dbData.put("data", new AttributeValue().withS(testData));
-            dbData.put("lastmodified", new AttributeValue()
-                       .withN(Long.toString(System.currentTimeMillis(), 10)));
-
-            PutItemRequest putRequest = new PutItemRequest()
-                .withTableName(tableName)
-                .withItem(dbData);
-            try {
-                PutItemResult putResult = getDynamo().putItem(putRequest);
-            } catch (AmazonClientException e) {
-                log.info("Test put to " + tableName + " failed, wait and try " +
-                         i + " more times");
-            }
-
-            // sample read
-            GetItemRequest request = new GetItemRequest()
-                .withTableName(tableName)
-                .withKey(new Key().withHashKeyElement(new AttributeValue().withS(testId)));
-            request = request.withConsistentRead(true);
-
-            GetItemResult getResult = null;
-            try {
-                getResult = getDynamo().getItem(request);
-            } catch (AmazonClientException e) {
-                log.info("Test get from " + tableName + " failed, wait and try " +
-                         i + " more times");
-            }
-            if (getResult != null &&
-                getResult.getItem() != null &&
-                getResult.getItem().get("data") != null) {
-                readBack = getResult.getItem().get("data").getS();
-            }
-
-            if (testData.equals(readBack)) {
-                break;
-            }
-
-            // TODO: is sleep the right thing to do here?  how do we wait to retry?
-            try {
-                Thread.sleep(100);
-            } catch (InterruptedException e) {
-            }
-        }
-    }
-
-    /**
-     * Dynamically calculate the provisioned capacity for new or retiring tables
-     * @param readOnly - used when a table is rotated into 'previous table' position.
-     * @return
-     */
-    protected ProvisionedThroughput getProvisionedThroughputObject(boolean readOnly) {
-        // TODO: bump up requestsPerSecond if we start seeing
-        // ProvisionedThroughputExceededExceptions
-        long readUnit = requestsPerSecond*sessionSize;
-        // by default, we need the same write throughput as read throughput (one read, one write per request).
-        long writeUnit = readUnit;
-        if (readOnly) {
-            writeUnit = 1L;   // minimun is 1 unit, and we won't be writing to old tables.
-        }
-        // eventual consistency reads are two-for-the-price-of-one
-        if (eventualConsistency) {
-            readUnit = readUnit / 2;
-        }
-        ProvisionedThroughput throughput = new ProvisionedThroughput().withReadCapacityUnits(readUnit)
-                .withWriteCapacityUnits(writeUnit);
-        return throughput;
-    }
-
-    protected AmazonDynamoDB getDynamo() {
-        if (this.dynamo != null) {
-            return this.dynamo;
-        }
-        if (awsAccessKey.isEmpty() && dynamoEndpoint.isEmpty()) {
-            log.severe("No connection properties specified for Dynamo");
-            // FIXME try to connect anyway
-            return null;
-        }
-        this.dynamo = new AmazonDynamoDBClient(new BasicAWSCredentials(awsAccessKey, awsSecretKey));
-        log.info("Connecting to Dynamo with credentials: " + awsAccessKey + " / " + awsSecretKey);
-        if (!dynamoEndpoint.isEmpty()) {
-            // Using some sort of mock connection for QA/testing (see ddbmock or Alternator)
-            log.info("Setting dynamo endpoint: " + dynamoEndpoint);
-            this.dynamo.setEndpoint(dynamoEndpoint);
-        }
-        return this.dynamo;
-    }
-
-    public int getSize() throws IOException {
-        QueryResult result = getDynamo().query(new QueryRequest().withTableName(currentTableName).withCount(true));
-        return result.getCount();
-    }
-
     public Session loadSession(String id) throws IOException {
+        if (rotator == null) {
+            log.severe("Processing requests but rotator is not initialized");
+        }
+        if (rotator.getCurrentTableName() == null) {
+            log.severe("No table is yet set to current");
+        }
 
         long t0 = System.currentTimeMillis();
         if (id == null || id.length() == 0) {
@@ -548,7 +433,7 @@ public class DynamoManager implements Manager, Lifecycle {
         try {
             log.fine("Loading session " + id + " from Dynamo");
             GetItemRequest request = new GetItemRequest()
-                    .withTableName(currentTableName)
+                    .withTableName(rotator.getCurrentTableName())
                     .withKey(new Key().withHashKeyElement(new AttributeValue().withS(id)));
             // set eventual consistency or fully consistent
             request = request.withConsistentRead(!eventualConsistency);
@@ -556,15 +441,15 @@ public class DynamoManager implements Manager, Lifecycle {
             GetItemResult result = getDynamo().getItem(request);
 
             // if not found in the current table, we look in the previous table
-            if (result == null || result.getItem() == null && !previousTableName.isEmpty()) {
-                log.fine("Falling back to previous table: " + previousTableName);
-                request = request.withTableName(previousTableName);
+            if (result == null || result.getItem() == null && rotator.getPreviousTableName() != null) {
+                log.fine("Falling back to previous table: " + rotator.getPreviousTableName());
+                request = request.withTableName(rotator.getPreviousTableName());
                 result = getDynamo().getItem(request);
             }
 
             if (result == null || result.getItem() == null) {
                 log.info("Session " + id + " not found in Dynamo");
-                StandardSession ret = getNewSession();
+                StandardSession ret = (DynamoSession) createEmptySession();
                 ret.setId(id);
                 currentSession.set(ret);
                 return ret;
@@ -603,8 +488,7 @@ public class DynamoManager implements Manager, Lifecycle {
             throw e;
         } catch (ResourceNotFoundException e) {
             log.log(Level.SEVERE, "Unable to deserialize session ", e);
-            log.info("Attempting to re-initialize table");
-            ensureTable(currentTableName);
+            backgroundProcess(); // try to speed up processing
             throw e;
         } catch (ClassNotFoundException ex) {
             log.log(Level.SEVERE, "Unable to deserialize session ", ex);
@@ -635,7 +519,7 @@ public class DynamoManager implements Manager, Lifecycle {
             dbData.put("data", new AttributeValue().withB(data));
             dbData.put("lastmodified", new AttributeValue().withN(Long.toString(System.currentTimeMillis(), 10)));
 
-            PutItemRequest putRequest = new PutItemRequest().withTableName(currentTableName).withItem(dbData);
+            PutItemRequest putRequest = new PutItemRequest().withTableName(rotator.getCurrentTableName()).withItem(dbData);
             PutItemResult result = getDynamo().putItem(putRequest);
 
             long t1 = System.currentTimeMillis();
@@ -655,10 +539,11 @@ public class DynamoManager implements Manager, Lifecycle {
         log.fine("Removing session ID : " + session.getId());
         Key key = new Key(new AttributeValue().withS(session.getId()));
         try {
-            DeleteItemRequest deleteItemRequest = new DeleteItemRequest().withTableName(currentTableName).withKey(key);
+            DeleteItemRequest deleteItemRequest = new DeleteItemRequest().withTableName(rotator.getCurrentTableName()).withKey(key);
             getDynamo().deleteItem(deleteItemRequest);
-            if (!previousTableName.isEmpty()) {
-                deleteItemRequest = deleteItemRequest.withTableName(previousTableName);
+            if (rotator.getPreviousTableName() != null) {
+                // TODO: this is something of an issue since we have provisioned the previous table to low-write-volume
+                deleteItemRequest = deleteItemRequest.withTableName(rotator.getPreviousTableName());
                 getDynamo().deleteItem(deleteItemRequest);
             }
 
@@ -669,111 +554,36 @@ public class DynamoManager implements Manager, Lifecycle {
         }
     }
 
-    @Override
-    public void removePropertyChangeListener(PropertyChangeListener propertyChangeListener) {
-        //To change body of implemented methods use File | Settings | File Templates.
-    }
-
-    // FIXME: this is being run from multiple threads?
-    // the previous and current table names need to be static
-    public static synchronized boolean rotateTables(Set<String> tableNames, String currentTableName_temp,
-                                                    String previousTableName_temp) {
-        boolean rotated = false;
-        if (tableNames.contains(currentTableName_temp) && !currentTableName_temp.equals(currentTableName)) {
-            log.info("Setting current table name to " + currentTableName_temp);
-            currentTableName = currentTableName_temp;
+    protected AmazonDynamoDB getDynamo() {
+        if (this.dynamo != null) {
+            return this.dynamo;
         }
-
-        // Check to see if we need to set the previous table name, and modify the table to be read only if we do.
-        if (tableNames.contains(previousTableName_temp) && !previousTableName_temp.equals(previousTableName)) {
-            log.info("Setting previous table name to " + previousTableName_temp);
-            previousTableName = previousTableName_temp;
-            rotated = true; // triggers the read-only modification on the previous table the first time it is moved.
+        if (awsAccessKey.isEmpty() && dynamoEndpoint.isEmpty()) {
+            log.severe("No connection properties specified for Dynamo");
+            // FIXME try to connect anyway
+            return null;
         }
-        return rotated;
-    }
-
-    /**
-     * Check to see if we need to rotate the tables or delete an expired table.
-     */
-    public synchronized void checkTableRotation(long nowSeconds) {
-        // check to see if we need to create a new table (future table)
-        Set<String> tableNames = new HashSet(getDynamo().listTables().getTableNames());
-        long timeOfNextTable = nowSeconds + getMaxInactiveInterval() - nowSeconds % getMaxInactiveInterval();
-        String nextTableName = getNextTableName(nowSeconds);
-        if (timeOfNextTable <= nowSeconds + CREATE_TABLE_HEADROOM_SECONDS && !tableNames.contains(nextTableName)) {
-            log.info(timeOfNextTable-nowSeconds + " seconds until next table required, creating it now.");
-            ensureTable(nextTableName);
+        this.dynamo = new AmazonDynamoDBClient(new BasicAWSCredentials(awsAccessKey, awsSecretKey));
+        log.info("Connecting to Dynamo with credentials: " + awsAccessKey + " / " + awsSecretKey);
+        if (!dynamoEndpoint.isEmpty()) {
+            // Using some sort of mock connection for QA/testing (see ddbmock or Alternator)
+            log.info("Setting dynamo endpoint: " + dynamoEndpoint);
+            this.dynamo.setEndpoint(dynamoEndpoint);
         }
-
-        // Get some temp variables of what the current table *should* be called, but don't set the member field yet
-        // until we know that the table actually exists
-        String currentTableName_temp = getCurrentTableName(nowSeconds);
-        String previousTableName_temp = getPreviousTableName(nowSeconds);
-
-        // check if we need to switch the currently active tableName (and previous table name)
-        if (!tableNames.contains(currentTableName_temp)) {
-            log.warning("The current Dynamo table doesn't exist, creating it now: " + currentTableName_temp);
-            ensureTable(currentTableName_temp);
-        }
-
-        boolean rotated = rotateTables(tableNames, currentTableName_temp, previousTableName_temp);
-        if (rotated) {
-            // after rotation, the old table can be set to read-only to save $$$
-            ProvisionedThroughput throughput = getProvisionedThroughputObject(true);
-            log.info("Reprovisioning the previous table to read-only: " + previousTableName + ", " + throughput);
-            UpdateTableRequest updateTableRequest = new UpdateTableRequest().withTableName(previousTableName)
-                    .withProvisionedThroughput(throughput);
-            getDynamo().updateTable(updateTableRequest);
-        }
-
-        // TODO: check to see if we need to remove an expired table
-        // can probably do this asynchronously later
-        Set<String> tablesToKeep = new HashSet<String>(Arrays.asList(currentTableName_temp, previousTableName_temp,
-                nextTableName));
-        Set<String> tablesToDelete = new HashSet<String>();
-        for (String tableName : tableNames) {
-            if (tableName.startsWith(tableBaseName) && !tablesToKeep.contains(tableName)) {
-                log.info("Deleting expired table: " + tableName);
-                DeleteTableRequest dtr = new DeleteTableRequest().withTableName(tableName);
-                getDynamo().deleteTable(dtr);
-            }
-        }
-
-    }
-
-    /**
-     * Figure out the name of the current table using the current time.
-     * We bin the sessions into tables every maxInactiveInterval seconds
-     *
-     */
-    public String getCurrentTableName(long timestampSeconds) {
-        long tableTimestamp = timestampSeconds - timestampSeconds % getMaxInactiveInterval();
-        return tableBaseName + "_" + tableTimestamp;
-    }
-
-    /**
-     * Figure out the name of the previous table using the current time.
-     * We bin the sessions into tables every maxInactiveInterval seconds and
-     * keep the last one around while we transition.
-     */
-    public String getPreviousTableName(long timestampSeconds) {
-        long tableTimestamp = timestampSeconds - timestampSeconds % getMaxInactiveInterval() - getMaxInactiveInterval();
-        return tableBaseName + "_" + tableTimestamp;
-    }
-
-    /**
-     * Figure out the name of the next table using the current time.
-     */
-    public String getNextTableName(long timestampSeconds) {
-        long tableTimestamp = timestampSeconds - timestampSeconds % getMaxInactiveInterval() + getMaxInactiveInterval();
-        return tableBaseName + "_" + tableTimestamp;
+        return this.dynamo;
     }
 
     private void initDbConnection() throws LifecycleException {
+        long nowSeconds = System.currentTimeMillis() / 1000;
         try {
             getDynamo();
-            checkTableRotation(System.currentTimeMillis()/1000);
+            this.rotator = new DynamoTableRotator(getTableBaseName(), getMaxInactiveInterval(), getRequestsPerSecond(),
+                    getSessionSize(), getEventualConsistency());
+            rotator.setDynamo(getDynamo());
+            String firstTable = rotator.createCurrentTableName(nowSeconds);
+            log.info("initializing first table: " + firstTable);
+            rotator.ensureTable(firstTable, DynamoTableRotator.CREATE_TABLE_HEADROOM_SECONDS * 2000);
+            rotator.currentTableName = firstTable;
 
             log.info("Connected to Dynamo for session storage. Session live time = "
                     + (getMaxInactiveInterval()) + "s");
@@ -823,4 +633,5 @@ public class DynamoManager implements Manager, Lifecycle {
         }
         return false;
     }
+
 }

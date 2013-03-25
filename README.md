@@ -6,13 +6,12 @@ Overview
 
 This is a tomcat session manager that saves sessions in Amazon Dynamo DB, based on the
 [Mongo version by David Dawson.](https://github.com/dawsonsystems/Mongo-Tomcat-Sessions)
-It is made up of DynamoManager, that provides the save/load functions, and DynamoSessionTrackerValve that controls the
-timing of the save.
+It is made up of DynamoManager, that provides the save/load functions, DynamoSessionTrackerValve that controls the
+timing of the save, and DynamoTableRotator that manages session expiration by moving active sessions to a new table and
+deleting the old table.
 
 The manager can use a local implementation of Dynamo for QA / testing purposes, by specifying the 'dynamoEndpoint'
 parameter. One implementation that works (albeit slowly) is [Fake Dynamo.](https://github.com/ananthakumaran/fake_dynamo)
-
-
 
 Usage
 -----
@@ -32,6 +31,7 @@ Add the following into your tomcat server.xml, or context.xml
 
 The Valve must be before the Manager.
 
+
 The following parameters are available on the Manager :-
 
 <table>
@@ -44,14 +44,23 @@ as Fake Dynamo: e.g. http://localhost:9090/.</td></tr>
 <tr><td>eventualConsistency</td><td>Use eventual consistency reads or standard reads</td></tr>
 <tr><td>maxInactiveInterval</td><td>Optional, the initial maximum time interval, in seconds, between client requests
 before a session is invalidated. A negative value will result in sessions never timing out. If the attribute is not
-provided, a default of 60 seconds is used by the base class, but due to hourly billing we recommend at least an hour.</td></tr>
+provided, a default of 60 seconds is set by the base class, but due to hourly billing and table creation latency
+we recommend at least an hour.</td></tr>
 <tr><td>tableBaseName</td><td>Optional, the base Dynamo table name to use. The default is 'tomcat-sessions'</td></tr>
 <tr><td>ignoreUris</td><td>Optional, if the request URI matches this regex, the session will not be saved to Dynamo.</td></tr>
 <tr><td>ignoreHeaders</td><td>Optional, if the request has a header name matching this regex, the session will not be saved to Dynamo.</td></tr>
 </table>
 
+Set backgroundProcessDelay to a small number (usually in server.xml):
+    <Engine name="Catalina"
+        backgroundProcessorDelay="1"
+    >
+
 Copy the dynamo-session-manager jar and the dependencies from target/lib/ into the tomcat lib directory
 (e.g. /usr/share/tomcat6/lib) and you're good to go.
+
+
+
 
 Expiration
 ----------
@@ -72,12 +81,17 @@ The tables are named like
 The current table timestamp is (currentTime - currentTime % maxInactiveInterval).
 
 A background task creates the next table before it is required, provisions the previous table for read-only
- and deletes the expired table.
+ and deletes the expired table. We have found that table creation takes approximately 60s.
+
+The table rotation should be synchronized as much as possible across different tomcat servers. In practice with Elastic
+Load Balancers (even in non-sticky mode) this is mitigated by a general stickiness of a client to a server, but we can
+reduce the gap between different servers rotating tables by checking more frequently. In server.xml, set the
+Engine.backgroundProcessDelay to 1s, as shown above.
 
 Provisioning
 ------------
 
-You need to provision one read and one write unit per request, i.e. if your app has a peak throughput of 10 requests per,
+You need to provision one read and one write unit per request, i.e. if your app has a peak throughput of 10 requests per
 second, you need 10 reads per second and 10 writes per second during normal activity.
 
 10 reads per second = 1x (block of 50 read units per second) = $0.01 / hour
@@ -85,9 +99,10 @@ second, you need 10 reads per second and 10 writes per second during normal acti
 
 If your sessions are greater than 1kB, you need to multiply your provisioned units by the session size in kB.
 
-Because we use multiple tables, you will actually pay roughly 1.5X this cost (current table r/w + previous table read only).
- At times, we will also have a future table or an expired table for a few seconds.
+Because we use multiple tables, you will actually pay roughly 1.5X this cost (current table r/w + previous table read
+only). At times, we will also have a future table or an expired table for a few seconds.
 
-
+Note: if you delete sessions frequently, you will need to disable the down-provisioning code since you will need to
+delete from both the current table and the previous table.
 
 License: Apache 2.0
