@@ -51,7 +51,8 @@ we recommend at least an hour.</td></tr>
 <tr><td>ignoreHeaders</td><td>Optional, if the request has a header name matching this regex, the session will not be saved to Dynamo.</td></tr>
 </table>
 
-Set backgroundProcessDelay to a small number (usually in server.xml):
+Set backgroundProcessDelay to a small number (usually in server.xml)
+
     <Engine name="Catalina"
         backgroundProcessorDelay="1"
     >
