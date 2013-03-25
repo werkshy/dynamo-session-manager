@@ -69,7 +69,7 @@ Expiration
 We take the approach that sessions that haven't been accessed for a certain time should be removed from the store.
 Unlike the Mongo session manager, scanning for expired sessions in Dynamo is very expensive (it literally costs you
 money!) and is hard to provision for. The approach taken here is to rotate the Dynamo table and drop whole tables when
-they are expired. Active sessions will be read from the previous table and stored in the current table, in active ones
+they are expired. Active sessions will be read from the previous table and stored in the current table, inactive ones
 will be left in the previous table and deleted.
 
 Table A: current table, read/write
