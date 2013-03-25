@@ -1,0 +1,8 @@
+#!/bin/bash
+
+set -e
+
+
+mvn javadoc:jar source:jar package deploy
+
+
