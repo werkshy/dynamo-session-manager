@@ -1,9 +1,10 @@
 /***********************************************************************************************************************
  *
- * Mongo Tomcat Sessions
+ * Dynamo Tomcat Sessions
  * ==========================================
  *
  * Copyright (C) 2012 by Dawson Systems Ltd (http://www.dawsonsystems.com)
+ * Copyright (C) 2013 by EnergyHub Inc. (http://www.energyhub.com)
  *
  ***********************************************************************************************************************
  *
@@ -18,7 +19,7 @@
  *
  **********************************************************************************************************************/
 
-package com.dawsonsystems.session;
+package net.energyhub.session;
 
 import org.apache.catalina.session.StandardSession;
 import org.apache.catalina.util.CustomObjectInputStream;
@@ -40,19 +41,29 @@ public class JavaSerializer implements Serializer {
 
     @Override
     public ByteBuffer serializeFrom(HttpSession session) throws IOException {
+        ObjectOutputStream oos = null;
+        try {
+            StandardSession standardSession = (StandardSession) session;
+            ByteArrayOutputStream bos = new ByteArrayOutputStream();
+            GZIPOutputStream gzos = new GZIPOutputStream(new BufferedOutputStream(bos));
+            oos = new ObjectOutputStream(gzos);
 
-        StandardSession standardSession = (StandardSession) session;
-        ByteArrayOutputStream bos = new ByteArrayOutputStream();
-        GZIPOutputStream gzos = new GZIPOutputStream(new BufferedOutputStream(bos));
-        ObjectOutputStream oos = new ObjectOutputStream(gzos);
-        oos.writeLong(standardSession.getCreationTime());
-        standardSession.writeObjectData(oos);
+            oos.writeLong(standardSession.getCreationTime());
+            standardSession.writeObjectData(oos);
 
-        oos.close();
-        gzos.finish();
-        gzos.close();
+            gzos.finish();
+            oos.flush();
 
-        return ByteBuffer.wrap(bos.toByteArray());
+            return ByteBuffer.wrap(bos.toByteArray());
+        } finally {
+            if (oos != null) {
+                try {
+                    oos.close();
+                } catch (IOException e) {
+                    // at this point nothing can be done
+                }
+            }
+        }
     }
 
     @Override

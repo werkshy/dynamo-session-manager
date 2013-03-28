@@ -1,9 +1,10 @@
 /***********************************************************************************************************************
  *
- * Mongo Tomcat Sessions
+ * Dynamo Tomcat Sessions
  * ==========================================
  *
  * Copyright (C) 2012 by Dawson Systems Ltd (http://www.dawsonsystems.com)
+ * Copyright (C) 2013 by EnergyHub Inc. (http://www.energyhub.com)
  *
  ***********************************************************************************************************************
  *
@@ -18,7 +19,7 @@
  *
  **********************************************************************************************************************/
 
-package com.dawsonsystems.session;
+package net.energyhub.session;
 
 import javax.servlet.http.HttpSession;
 import java.io.IOException;
