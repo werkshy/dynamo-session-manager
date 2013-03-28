@@ -1,5 +1,25 @@
 package net.energyhub.session;
 
+/***********************************************************************************************************************
+ *
+ * Dynamo Tomcat Sessions
+ * ==========================================
+ *
+ * Copyright (C) 2013 by EnergyHub Inc. (http://www.energyhub.com)
+ *
+ ***********************************************************************************************************************
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
+ * the License. You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on
+ * an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the
+ * specific language governing permissions and limitations under the License.
+ *
+ **********************************************************************************************************************/
+
 import com.amazonaws.AmazonClientException;
 import com.amazonaws.services.dynamodb.AmazonDynamoDB;
 import com.amazonaws.services.dynamodb.model.*;
@@ -27,34 +47,33 @@ public class DynamoTableRotator {
     private static Logger log = Logger.getLogger("net.energyhub.session.DynamoTableRotator");
     public static final long CREATE_TABLE_HEADROOM_SECONDS = 60;
 
-    protected AmazonDynamoDB dynamo = null;
-    protected String tableBaseName = "tomcat-sessions";
+    protected AmazonDynamoDB dynamo;
+    protected String tableBaseName;
     protected Integer maxInactiveInterval;
-    protected Integer requestsPerSecond = 10; // for provisioning
-    protected Integer sessionSize = 1; // in kB
-    protected Boolean eventualConsistency = false;
-    protected String currentTableName = null;
-    protected String previousTableName =null;
-    protected Semaphore semaphore = new Semaphore(1);
+    protected Integer requestsPerSecond; // for provisioning
+    protected Integer sessionSize; // in kB
+    protected Boolean eventualConsistency;
+    protected String currentTableName;
+    protected String previousTableName;
+    protected Semaphore semaphore;
 
     public DynamoTableRotator(String tableBaseName, Integer maxInactiveInterval, Integer requestsPerSecond,
-                              Integer sessionSize, Boolean eventualConsistency) {
+                              Integer sessionSize, Boolean eventualConsistency, AmazonDynamoDB dynamo) {
         log.info("Initializing rotator");
         this.tableBaseName = tableBaseName;
         this.maxInactiveInterval = maxInactiveInterval;
         this.requestsPerSecond = requestsPerSecond;
         this.sessionSize = sessionSize;
         this.eventualConsistency = eventualConsistency;
-    }
-
-    public void setDynamo(AmazonDynamoDB dynamo) {
         this.dynamo = dynamo;
+        this.semaphore = new Semaphore(1);
     }
 
-    public String getCurrentTableName() {
+    public synchronized String getCurrentTableName() {
         return this.currentTableName;
     }
-    public String getPreviousTableName() {
+
+    public synchronized String getPreviousTableName() {
         return this.previousTableName;
     }
 
@@ -104,19 +123,16 @@ public class DynamoTableRotator {
     }
 
     /**
-     * Look at existing tables to see if we need to pre-create the next table.
-     * @param nowSeconds
-     * @return
+     * Look at existing tables to see if we need to pre-create the next new (future) table.
      */
     protected boolean createTableRequired(long nowSeconds) {
-        // check to see if we need to create a new table (future table)
         long timeOfNextTable = nowSeconds + maxInactiveInterval - nowSeconds % maxInactiveInterval;
         if (timeOfNextTable >= nowSeconds + CREATE_TABLE_HEADROOM_SECONDS) {
             log.finer(timeOfNextTable-nowSeconds + " seconds until next table required, not doing it yet.");
             return false;
         }
 
-        Set<String> tableNames = new HashSet(dynamo.listTables().getTableNames());
+        Set<String> tableNames = new HashSet<String>(dynamo.listTables().getTableNames());
         String nextTableName = createNextTableName(nowSeconds);
         if (!tableNames.contains(nextTableName)) {
             log.info(timeOfNextTable-nowSeconds + " seconds until next table required, we should create it.");
@@ -126,8 +142,6 @@ public class DynamoTableRotator {
         }
         return false;
     }
-
-
 
     protected void createTable(String tableName) {
         log.info("Creating table " + tableName);
@@ -146,7 +160,7 @@ public class DynamoTableRotator {
         // AmazonServiceException for creating existing table
     }
 
-    public void ensureTable(String tableName, long timeoutMillis) {
+    protected void ensureTable(String tableName, long timeoutMillis) throws InterruptedException {
         List<String> tableNames = dynamo.listTables().getTableNames();
         if (!tableNames.contains(tableName)) {
             createTable(tableName);
@@ -154,10 +168,10 @@ public class DynamoTableRotator {
         waitForTable(tableName, timeoutMillis);
     }
 
-    public void waitForTable(String tableName, long timeoutMillis) {
+    protected void waitForTable(String tableName, long timeoutMillis) throws InterruptedException {
         long waitStart = System.currentTimeMillis();
 
-        while(true) {
+        while (true) {
             DescribeTableResult result = dynamo.describeTable(new DescribeTableRequest().withTableName(tableName));
             String status = result.getTable().getTableStatus();
             log.info("Table " + tableName + " state: " + status);
@@ -168,16 +182,13 @@ public class DynamoTableRotator {
                 log.severe("Timeout waiting for table " + tableName + " to become active");
                 return;
             }
-            try {
-                Thread.sleep(1000);
-            } catch (InterruptedException e) {
-            }
+            Thread.sleep(1000);
         }
 
         String readBack = null;
         String testData = "test";
         String testId = "test_id";
-        while(true) {
+        while (true) {
             // sample write
             Map<String, AttributeValue> dbData = new HashMap<String, AttributeValue>();
             dbData.put("id", new AttributeValue().withS(testId));
@@ -221,15 +232,9 @@ public class DynamoTableRotator {
                 return;
             }
 
-            // TODO: is sleep the right thing to do here?  how do we wait to retry?
-            try {
-                Thread.sleep(100);
-            } catch (InterruptedException e) {
-            }
+            Thread.sleep(100);
         }
     }
-
-
 
     /**
      * Dynamically calculate the provisioned capacity for new or retiring tables
@@ -259,7 +264,7 @@ public class DynamoTableRotator {
      * and provision the outgoing active table as read-only to save money.
      * @param nowSeconds
      */
-    public synchronized void rotateTables(long nowSeconds) {
+    protected void rotateTables(long nowSeconds) {
         // Get some temp variables of what the current table *should* be called, but don't set the member field yet
         // until we know that the table actually exists
         String targetCurrentTableName = createCurrentTableName(nowSeconds);
@@ -275,11 +280,14 @@ public class DynamoTableRotator {
             return;
 
         }
-        log.info("Rotating current table from " + currentTableName + " to " + targetCurrentTableName);
-        currentTableName = targetCurrentTableName;
+        synchronized (this) {
+            log.info("Rotating current table from " + currentTableName + " to " + targetCurrentTableName);
+            currentTableName = targetCurrentTableName;
 
-        log.info("Rotating previous table from " + previousTableName + " to " + targetPreviousTableName);
-        previousTableName = targetPreviousTableName;
+            log.info("Rotating previous table from " + previousTableName + " to " + targetPreviousTableName);
+            previousTableName = targetPreviousTableName;
+        }
+
         downProvision(previousTableName);
 
         removeExpiredTables(tableNames, nowSeconds);
@@ -301,8 +309,9 @@ public class DynamoTableRotator {
         }
     }
 
-    /** Check to see if we need to remove an expired table.
-     *  Removes any tables that aren't current, previous or next.
+    /**
+     * Check to see if we need to remove an expired table.
+     * Removes any tables that aren't current, previous or next.
      */
     protected void removeExpiredTables(List<String> tableNames, long nowSeconds) {
         String nextTableName = createNextTableName(nowSeconds);
@@ -327,9 +336,8 @@ public class DynamoTableRotator {
     /**
      * Figure out the name of the current table using the current time.
      * We bin the sessions into tables every maxInactiveInterval seconds
-     *
      */
-    public String createCurrentTableName(long timestampSeconds) {
+    protected String createCurrentTableName(long timestampSeconds) {
         long tableTimestamp = timestampSeconds - timestampSeconds % this.maxInactiveInterval;
         return tableBaseName + "_" + tableTimestamp;
     }
@@ -339,7 +347,7 @@ public class DynamoTableRotator {
      * We bin the sessions into tables every maxInactiveInterval seconds and
      * keep the last one around while we transition.
      */
-    public String createPreviousTableName(long timestampSeconds) {
+    protected String createPreviousTableName(long timestampSeconds) {
         long tableTimestamp = timestampSeconds - timestampSeconds % this.maxInactiveInterval - this.maxInactiveInterval;
         return tableBaseName + "_" + tableTimestamp;
     }
@@ -347,13 +355,9 @@ public class DynamoTableRotator {
     /**
      * Figure out the name of the next table using the current time.
      */
-    public String createNextTableName(long timestampSeconds) {
+    protected String createNextTableName(long timestampSeconds) {
         long tableTimestamp = timestampSeconds - timestampSeconds % maxInactiveInterval + maxInactiveInterval;
         return tableBaseName + "_" + tableTimestamp;
     }
-
-
-
-
 
 }

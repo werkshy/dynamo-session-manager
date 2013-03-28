@@ -1,9 +1,10 @@
 /***********************************************************************************************************************
  *
- * Mongo Tomcat Sessions
+ * Dynamo Tomcat Sessions
  * ==========================================
  *
  * Copyright (C) 2012 by Dawson Systems Ltd (http://www.dawsonsystems.com)
+ * Copyright (C) 2013 by EnergyHub Inc. (http://www.energyhub.com)
  *
  ***********************************************************************************************************************
  *
@@ -24,10 +25,7 @@ import com.amazonaws.services.dynamodb.model.AttributeValue;
 import org.apache.catalina.Manager;
 import org.apache.catalina.session.StandardSession;
 
-import java.util.logging.Logger;
-
 public class DynamoSession extends StandardSession {
-    private static Logger log = Logger.getLogger("DynamoManager");
     private boolean isValid = true;
 
     public DynamoSession(Manager manager) {

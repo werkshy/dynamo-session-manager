@@ -3,10 +3,8 @@
  * Dynamo Tomcat Sessions
  * ==========================================
  *
- * Copyright (C) 2012-2013
- *   by Dawson Systems Ltd (http://www.dawsonsystems.com)
- *   and EnergyHub, Inc (http://www.energyhub.com)
- *
+ * Copyright (C) 2012 by Dawson Systems Ltd (http://www.dawsonsystems.com)
+ * Copyright (C) 2013 by EnergyHub Inc. (http://www.energyhub.com)
  *
  ***********************************************************************************************************************
  *
@@ -23,12 +21,10 @@
 
 package net.energyhub.session;
 
-import com.amazonaws.AmazonClientException;
 import com.amazonaws.auth.BasicAWSCredentials;
 import com.amazonaws.services.dynamodb.AmazonDynamoDB;
 import com.amazonaws.services.dynamodb.AmazonDynamoDBClient;
 import com.amazonaws.services.dynamodb.model.*;
-import com.dawsonsystems.session.Serializer;
 import org.apache.catalina.*;
 import org.apache.catalina.connector.Request;
 import org.apache.catalina.session.StandardSession;
@@ -37,39 +33,38 @@ import java.beans.PropertyChangeListener;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.*;
-import java.util.concurrent.ScheduledExecutorService;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.regex.Pattern;
 
 public class DynamoManager implements Manager, Lifecycle {
     private static Logger log = Logger.getLogger("net.energyhub.session.DynamoManager");
+
     protected static String awsAccessKey = "";  // Required for production environment
     protected static String awsSecretKey = "";  // Required for production environment
     protected static String dynamoEndpoint = ""; // used only for QA mock dynamo connections (not production)
     protected static String tableBaseName = "tomcat-sessions";
-    protected static Integer maxInactiveInterval = 3600; // default in seconds
+    protected static int maxInactiveInterval = 3600; // default in seconds
     protected static String ignoreUri = "";
     protected static String ignoreHeader = "";
-    protected static Boolean logSessionContents = false;
-    protected static Integer requestsPerSecond = 10; // for provisioning
-    protected static Integer sessionSize = 1; // in kB
-    protected static Boolean eventualConsistency = false;
-    protected AmazonDynamoDB dynamo = null;
-    protected DynamoTableRotator rotator = null;
+    protected static boolean logSessionContents = false;
+    protected static int requestsPerSecond = 10; // for provisioning
+    protected static int sessionSize = 1; // in kB
+    protected static boolean eventualConsistency = false;
 
+    protected AmazonDynamoDB dynamo;
+    protected DynamoTableRotator rotator;
     private DynamoSessionTrackerValve trackerValve;
     private ThreadLocal<StandardSession> currentSession = new ThreadLocal<StandardSession>();
     private Serializer serializer;
 
     //Either 'kryo' or 'java'
-    private String serializationStrategyClass = "com.dawsonsystems.session.JavaSerializer";
+    private String serializationStrategyClass = "net.energyhub.session.JavaSerializer";
 
     private Container container;
 
-    private ScheduledExecutorService expiresExecutorService = null;
-    private Pattern ignoreUriPattern = null;
-    private Pattern ignoreHeaderPattern = null;
+    private Pattern ignoreUriPattern;
+    private Pattern ignoreHeaderPattern;
 
     /////////////////////////////////////////////////////////////////
     //   Getters and Setters for Implementation Properties
@@ -106,7 +101,6 @@ public class DynamoManager implements Manager, Lifecycle {
         DynamoManager.awsSecretKey = awsSecretKey;
     }
 
-
     public static String getIgnoreHeader() {
         return ignoreHeader;
     }
@@ -123,52 +117,60 @@ public class DynamoManager implements Manager, Lifecycle {
         DynamoManager.ignoreUri = ignoreUri;
     }
 
-    public static Boolean getLogSessionContents() {
+    public static boolean getLogSessionContents() {
         return logSessionContents;
     }
 
-    public static void setLogSessionContents(Boolean logSessionContents) {
+    public static void setLogSessionContents(boolean logSessionContents) {
         DynamoManager.logSessionContents = logSessionContents;
     }
 
-    public static Integer getRequestsPerSecond() {
+    public static int getRequestsPerSecond() {
         return requestsPerSecond;
     }
 
-    public static void setRequestsPerSecond(Integer requestsPerSecond) {
+    public static void setRequestsPerSecond(int requestsPerSecond) {
         DynamoManager.requestsPerSecond = requestsPerSecond;
     }
 
-    public static Integer getSessionSize() {
+    public static int getSessionSize() {
         return sessionSize;
     }
 
-    public static void setSessionSize(Integer sessionSize) {
+    public static void setSessionSize(int sessionSize) {
         DynamoManager.sessionSize = sessionSize;
     }
 
-    public static Boolean getEventualConsistency() {
+    public static boolean getEventualConsistency() {
         return eventualConsistency;
     }
 
-    public static void setEventualConsistency(Boolean eventualConsistency) {
+    public static void setEventualConsistency(boolean eventualConsistency) {
         DynamoManager.eventualConsistency = eventualConsistency;
+    }
+
+    public void setSerializationStrategyClass(String strategy) {
+        this.serializationStrategyClass = strategy;
     }
 
     ////////////////////////////////////////////////////////////////////////////////
     //   Implement methods of Lifecycle
     ////////////////////////////////////////////////////////////////////////////////
 
+    @Override
     public void addLifecycleListener(LifecycleListener lifecycleListener) {
     }
 
+    @Override
     public LifecycleListener[] findLifecycleListeners() {
         return new LifecycleListener[0];  //To change body of implemented methods use File | Settings | File Templates.
     }
 
+    @Override
     public void removeLifecycleListener(LifecycleListener lifecycleListener) {
     }
 
+    @Override
     public void start() throws LifecycleException {
         log.info("Starting Dynamo Session Manager in container: " + this.getContainer().getName());
         for (Valve valve : getContainer().getPipeline().getValves()) {
@@ -209,9 +211,8 @@ public class DynamoManager implements Manager, Lifecycle {
         getDynamo().shutdown();
     }
 
-
     //////////////////////////////////////////////////////////////////////////////////
-    // Implementation of Manager
+    // Implement methods of Manager
     //////////////////////////////////////////////////////////////////////////////////
 
     @Override
@@ -294,14 +295,12 @@ public class DynamoManager implements Manager, Lifecycle {
 
     }
 
+    @Override
     public int getRejectedSessions() {
         return 0;
     }
 
-    public void setSerializationStrategyClass(String strategy) {
-        this.serializationStrategyClass = strategy;
-    }
-
+    @Override
     public void setRejectedSessions(int i) {
     }
 
@@ -324,10 +323,14 @@ public class DynamoManager implements Manager, Lifecycle {
     public void setSessionAverageAliveTime(int i) {
 
     }
+    @Override
     public void load() throws ClassNotFoundException, IOException {
+
     }
 
+    @Override
     public void unload() throws IOException {
+
     }
 
     @Override
@@ -341,12 +344,12 @@ public class DynamoManager implements Manager, Lifecycle {
 
     @Override
     public void addPropertyChangeListener(PropertyChangeListener propertyChangeListener) {
-        //To change body of implemented methods use File | Settings | File Templates.
+
     }
 
     @Override
     public void removePropertyChangeListener(PropertyChangeListener propertyChangeListener) {
-        //To change body of implemented methods use File | Settings | File Templates.
+
     }
 
     @Override
@@ -355,7 +358,6 @@ public class DynamoManager implements Manager, Lifecycle {
             rotator.process();
         }
     }
-
 
     @Override
     public void changeSessionId(Session session) {
@@ -378,10 +380,12 @@ public class DynamoManager implements Manager, Lifecycle {
     /**
      * @deprecated
      */
+    @Override
     public org.apache.catalina.Session createSession() {
         return createEmptySession();
     }
 
+    @Override
     public org.apache.catalina.Session createSession(java.lang.String sessionId) {
         StandardSession session = (DynamoSession) createEmptySession();
 
@@ -397,13 +401,15 @@ public class DynamoManager implements Manager, Lifecycle {
      * There is no good way to return a list of sessions from dynamo without scanning the table.
      * It is a design goal of this project to avoid scanning the table, so this method just returns
      * an empty array.
-     * @return
+     * @return an empty array
      */
+    @Override
     public org.apache.catalina.Session[] findSessions() {
         org.apache.catalina.Session[] sessions = new Session[]{};
         return sessions;
     }
 
+    @Override
     public Session findSession(String id) throws IOException {
         return loadSession(id);
     }
@@ -470,7 +476,6 @@ public class DynamoManager implements Manager, Lifecycle {
             session.setValid(true);
             session.setNew(false);
 
-
             if (logSessionContents && log.isLoggable(Level.FINE)) {
                 log.fine("Session Contents [" + session.getId() + "]:");
                 for (Object name : Collections.list(session.getAttributeNames())) {
@@ -527,7 +532,6 @@ public class DynamoManager implements Manager, Lifecycle {
                     + result.getConsumedCapacityUnits() + " write units.");
         } catch (IOException e) {
             log.severe(e.getMessage());
-            e.printStackTrace();
             throw e;
         } finally {
             currentSession.remove();
@@ -535,6 +539,7 @@ public class DynamoManager implements Manager, Lifecycle {
         }
     }
 
+    @Override
     public void remove(Session session) {
         log.fine("Removing session ID : " + session.getId());
         Key key = new Key(new AttributeValue().withS(session.getId()));
@@ -578,8 +583,7 @@ public class DynamoManager implements Manager, Lifecycle {
         try {
             getDynamo();
             this.rotator = new DynamoTableRotator(getTableBaseName(), getMaxInactiveInterval(), getRequestsPerSecond(),
-                    getSessionSize(), getEventualConsistency());
-            rotator.setDynamo(getDynamo());
+                    getSessionSize(), getEventualConsistency(), getDynamo());
             String firstTable = rotator.createCurrentTableName(nowSeconds);
             log.info("initializing first table: " + firstTable);
             rotator.ensureTable(firstTable, DynamoTableRotator.CREATE_TABLE_HEADROOM_SECONDS * 2000);
@@ -588,7 +592,6 @@ public class DynamoManager implements Manager, Lifecycle {
             log.info("Connected to Dynamo for session storage. Session live time = "
                     + (getMaxInactiveInterval()) + "s");
         } catch (Exception e) {
-            e.printStackTrace();
             throw new LifecycleException("Error Connecting to Dynamo", e);
         }
     }

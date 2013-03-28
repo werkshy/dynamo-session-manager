@@ -32,10 +32,9 @@ public class DynamoTableRotatorTest {
 
     @Before
     public void setUp() throws Exception {
-        this.rotator = new DynamoTableRotator("testTables", maxInterval, requestsPerSecond, sessionSize, eventualConsistency);
         this.dynamo = new AlternatorDBClient();
         this.db = new AlternatorDB().start();
-        rotator.setDynamo(dynamo);
+        this.rotator = new DynamoTableRotator("testTables", maxInterval, requestsPerSecond, sessionSize, eventualConsistency, dynamo);
     }
 
     @After
