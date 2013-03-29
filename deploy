@@ -3,7 +3,7 @@
 set -e
 
 echo "Copying jars to tomcat lib dir"
-cp target/dynamo-session-manager-1.5.jar target/lib/
+cp target/dynamo-session-manager-*.jar target/lib/
 cp target/lib/* /usr/share/tomcat6/lib/
 
 service tomcat6 restart
