@@ -126,7 +126,7 @@ public class DynamoTableRotatorTest {
     }
 
     @Test
-    public void createTable() {
+    public void createTable() throws Exception {
         String testTableName = "test_table_" + System.currentTimeMillis();
         rotator.ensureTable(testTableName, 10000);
         assertTrue(dynamo.listTables().getTableNames().contains(testTableName));
@@ -134,7 +134,7 @@ public class DynamoTableRotatorTest {
 
 
     @Test
-    public void ensureTableMakesWrite() {
+    public void ensureTableMakesWrite() throws Exception {
         String testTableName = "test_table_" + System.currentTimeMillis();
         rotator.ensureTable(testTableName, 10000);
 
