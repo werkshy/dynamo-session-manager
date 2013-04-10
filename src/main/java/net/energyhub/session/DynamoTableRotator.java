@@ -200,7 +200,7 @@ public class DynamoTableRotator {
                     .withTableName(tableName)
                     .withItem(dbData);
             try {
-                PutItemResult putResult = dynamo.putItem(putRequest);
+                dynamo.putItem(putRequest);
             } catch (AmazonClientException e) {
                 log.info("Test put to " + tableName + " failed, wait and try again");
             }
