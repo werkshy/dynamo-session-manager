@@ -51,12 +51,15 @@ public class DynamoManager implements Manager, Lifecycle {
     protected static int requestsPerSecond = 10; // for provisioning
     protected static int sessionSize = 1; // in kB
     protected static boolean eventualConsistency = false;
+    protected static String statsdHost = "";
+    protected static int statsdPort = 8125;
 
     protected AmazonDynamoDB dynamo;
     protected DynamoTableRotator rotator;
     private DynamoSessionTrackerValve trackerValve;
     private ThreadLocal<StandardSession> currentSession = new ThreadLocal<StandardSession>();
     private Serializer serializer;
+    private StatsdClient statsdClient = null;
 
     //Either 'kryo' or 'java'
     private String serializationStrategyClass = "net.energyhub.session.JavaSerializer";
@@ -149,9 +152,24 @@ public class DynamoManager implements Manager, Lifecycle {
         DynamoManager.eventualConsistency = eventualConsistency;
     }
 
+    public static void setStatsdHost(String statsdHost) {
+        DynamoManager.statsdHost = statsdHost;
+    }
+    public String getStatsdHost() {
+        return statsdHost;
+    }
+
+    public static void setStatsdPort(int statsdPort) {
+        DynamoManager.statsdPort = statsdPort;
+    }
+    public int getStatsdPort() {
+        return statsdPort;
+    }
+
     public void setSerializationStrategyClass(String strategy) {
         this.serializationStrategyClass = strategy;
     }
+
 
     ////////////////////////////////////////////////////////////////////////////////
     //   Implement methods of Lifecycle
@@ -203,6 +221,10 @@ public class DynamoManager implements Manager, Lifecycle {
         if (!getIgnoreHeader().isEmpty()) {
             log.info("Setting header ignore regex to: " + getIgnoreHeader());
             this.ignoreHeaderPattern = Pattern.compile(getIgnoreHeader());
+        }
+        if (!getStatsdHost().isEmpty()) {
+            log.info("Configuring statsd client on " + getStatsdHost() + ":" + getStatsdPort());
+            this.statsdClient = new StatsdClient(getStatsdHost(), getStatsdPort());
         }
         log.info("Finished starting manager");
     }
@@ -488,6 +510,9 @@ public class DynamoManager implements Manager, Lifecycle {
             long t1 = System.currentTimeMillis();
             log.info("Loaded session id " + id + " in " + (t1-t0) + "ms, "
                     + result.getConsumedCapacityUnits() + " read units");
+            if (statsdClient != null) {
+                statsdClient.time("session.load", t0, t1);
+            }
             currentSession.set(session);
             return session;
         } catch (IOException e) {
@@ -532,6 +557,10 @@ public class DynamoManager implements Manager, Lifecycle {
             long t1 = System.currentTimeMillis();
             log.fine("Updated session with id " + session.getIdInternal() + " in " + (t1 - t0) + "ms, "
                     + result.getConsumedCapacityUnits() + " write units.");
+            if (statsdClient != null) {
+                statsdClient.time("session.save", t0, t1);
+                statsdClient.timing("session.size", Math.round(result.getConsumedCapacityUnits()*1000));
+            }
         } catch (IOException e) {
             log.severe(e.getMessage());
             throw e;
@@ -571,7 +600,7 @@ public class DynamoManager implements Manager, Lifecycle {
             return null;
         }
         this.dynamo = new AmazonDynamoDBClient(new BasicAWSCredentials(awsAccessKey, awsSecretKey));
-        log.info("Connecting to Dynamo with credentials: " + awsAccessKey + " / " + awsSecretKey);
+        log.info("Connecting to Dynamo with accessKey: " + awsAccessKey);
         if (!dynamoEndpoint.isEmpty()) {
             // Using some sort of mock connection for QA/testing (see ddbmock or Alternator)
             log.info("Setting dynamo endpoint: " + dynamoEndpoint);
