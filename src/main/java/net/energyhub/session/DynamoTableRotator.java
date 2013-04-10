@@ -24,6 +24,7 @@ import com.amazonaws.AmazonClientException;
 import com.amazonaws.services.dynamodb.AmazonDynamoDB;
 import com.amazonaws.services.dynamodb.model.*;
 
+import java.text.SimpleDateFormat;
 import java.util.*;
 import java.util.concurrent.Semaphore;
 import java.util.logging.Logger;
@@ -56,6 +57,7 @@ public class DynamoTableRotator {
     protected String currentTableName;
     protected String previousTableName;
     protected Semaphore semaphore;
+    protected SimpleDateFormat dateFormat = new SimpleDateFormat("yyyyMMdd_HHmmss");
 
     public DynamoTableRotator(String tableBaseName, Integer maxInactiveInterval, Integer requestsPerSecond,
                               Integer sessionSize, Boolean eventualConsistency, AmazonDynamoDB dynamo) {
@@ -67,6 +69,7 @@ public class DynamoTableRotator {
         this.eventualConsistency = eventualConsistency;
         this.dynamo = dynamo;
         this.semaphore = new Semaphore(1);
+        this.dateFormat.setTimeZone(TimeZone.getTimeZone("UTC"));
     }
 
     public synchronized String getCurrentTableName() {
@@ -339,7 +342,7 @@ public class DynamoTableRotator {
      */
     protected String createCurrentTableName(long timestampSeconds) {
         long tableTimestamp = timestampSeconds - timestampSeconds % this.maxInactiveInterval;
-        return tableBaseName + "_" + tableTimestamp;
+        return tableBaseName + "_" + timestampSecondsToString(tableTimestamp);
     }
 
     /**
@@ -349,7 +352,7 @@ public class DynamoTableRotator {
      */
     protected String createPreviousTableName(long timestampSeconds) {
         long tableTimestamp = timestampSeconds - timestampSeconds % this.maxInactiveInterval - this.maxInactiveInterval;
-        return tableBaseName + "_" + tableTimestamp;
+        return tableBaseName + "_" + timestampSecondsToString(tableTimestamp);
     }
 
     /**
@@ -357,7 +360,15 @@ public class DynamoTableRotator {
      */
     protected String createNextTableName(long timestampSeconds) {
         long tableTimestamp = timestampSeconds - timestampSeconds % maxInactiveInterval + maxInactiveInterval;
-        return tableBaseName + "_" + tableTimestamp;
+        return tableBaseName + "_" + timestampSecondsToString(tableTimestamp);
     }
 
+    /**
+     * Format seconds-since-epoch into a string we can use in a dynamo table name
+     * @param timestampSeconds
+     * @return
+     */
+    protected String timestampSecondsToString(long timestampSeconds) {
+        return this.dateFormat.format(new Date(timestampSeconds*1000));
+    }
 }
