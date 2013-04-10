@@ -417,9 +417,11 @@ public class DynamoManager implements Manager, Lifecycle {
     public Session loadSession(String id) throws IOException {
         if (rotator == null) {
             log.severe("Processing requests but rotator is not initialized");
+            return null;
         }
         if (rotator.getCurrentTableName() == null) {
             log.severe("No table is yet set to current");
+            return null;
         }
 
         long t0 = System.currentTimeMillis();
