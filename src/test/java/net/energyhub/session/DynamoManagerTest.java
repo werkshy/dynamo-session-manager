@@ -33,5 +33,7 @@ public class DynamoManagerTest {
         db.stop();
     }
 
+    // tests all moved to DynamoTableRotatorTest
+
 
 }

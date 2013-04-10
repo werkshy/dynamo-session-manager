@@ -81,6 +81,35 @@ public class DynamoTableRotator {
     }
 
     /**
+     * During server startup, we may find that we need to create a new table (which will happen automatically in
+     * the background.) Rather than waiting for the current table to use, let's go back in time and look for existing
+     * active tables, and use that until the new one is online.
+     * @param nowSeconds
+     */
+    public void init(long nowSeconds) throws InterruptedException {
+        log.info("Initializing current table");
+
+        for (int i=0; i<10; i++) {
+            log.info("Searching for table from " + i*maxInactiveInterval + " seconds ago");
+            long searchSeconds = nowSeconds - i*maxInactiveInterval;
+            String tableName = createCurrentTableName(searchSeconds);
+            if (isActive(tableName)) {
+                // Triple-check the table works before using it
+                ensureTable(tableName, DynamoTableRotator.CREATE_TABLE_HEADROOM_SECONDS*2000);
+                currentTableName = tableName;
+                log.info("Found and used active table " + tableName + " from " + i + " periods ago");
+                return;
+            }
+        }
+        // Hmmm, none found? Let's
+        log.warning("No active tables found, will wait for the current one to come up and use that.");
+        String firstTable = createCurrentTableName(nowSeconds);
+        // If first table does not exist, go back and look for a previous table
+        ensureTable(firstTable, DynamoTableRotator.CREATE_TABLE_HEADROOM_SECONDS * 2000);
+        currentTableName = firstTable;
+    }
+
+    /**
      * Process is called by the manager to initiate table management (or see if management is required.)
      * This is typically run during background processing. The null case requires
      *    - one check on time (next table change is < 60s away)
@@ -175,10 +204,7 @@ public class DynamoTableRotator {
         long waitStart = System.currentTimeMillis();
 
         while (true) {
-            DescribeTableResult result = dynamo.describeTable(new DescribeTableRequest().withTableName(tableName));
-            String status = result.getTable().getTableStatus();
-            log.info("Table " + tableName + " state: " + status);
-            if (status.equals("ACTIVE")) {
+            if (isActive(tableName)) {
                 break;
             }
             if (System.currentTimeMillis() - waitStart > timeoutMillis) {
@@ -188,46 +214,8 @@ public class DynamoTableRotator {
             Thread.sleep(1000);
         }
 
-        String readBack = null;
-        String testData = "test";
-        String testId = "test_id";
         while (true) {
-            // sample write
-            Map<String, AttributeValue> dbData = new HashMap<String, AttributeValue>();
-            dbData.put("id", new AttributeValue().withS(testId));
-            dbData.put("data", new AttributeValue().withS(testData));
-            dbData.put("lastmodified", new AttributeValue()
-                    .withN(Long.toString(System.currentTimeMillis(), 10)));
-
-            PutItemRequest putRequest = new PutItemRequest()
-                    .withTableName(tableName)
-                    .withItem(dbData);
-            try {
-                dynamo.putItem(putRequest);
-            } catch (AmazonClientException e) {
-                log.info("Test put to " + tableName + " failed, wait and try again");
-            }
-
-            // sample read
-            GetItemRequest request = new GetItemRequest()
-                    .withTableName(tableName)
-                    .withKey(new Key().withHashKeyElement(new AttributeValue().withS(testId)));
-            request = request.withConsistentRead(true);
-
-            GetItemResult getResult = null;
-            try {
-                getResult = dynamo.getItem(request);
-            } catch (AmazonClientException e) {
-                log.info("Test get from " + tableName + " failed, wait and try again");
-            }
-            if (getResult != null &&
-                    getResult.getItem() != null &&
-                    getResult.getItem().get("data") != null) {
-                readBack = getResult.getItem().get("data").getS();
-            }
-
-            if (testData.equals(readBack)) {
-                log.info("Successfully read back data from " + tableName);
+            if (isWritable(tableName)) {
                 break;
             }
             if (System.currentTimeMillis() - waitStart > timeoutMillis) {
@@ -239,6 +227,78 @@ public class DynamoTableRotator {
         }
     }
 
+
+    /**
+     * Return true if the current table exists and is ACTIVE
+     * @param tableName
+     * @return
+     */
+    protected boolean isActive(String tableName) {
+        try {
+            DescribeTableResult result = dynamo.describeTable(new DescribeTableRequest().withTableName(tableName));
+            String status = result.getTable().getTableStatus();
+            log.info("Table " + tableName + " state: " + status);
+            return status.equals("ACTIVE");
+        } catch (ResourceNotFoundException e) {
+            log.info("Table " + tableName + " does not exist");
+            return false;
+        } catch (AmazonClientException e) {
+            log.severe("Dynamo problems, assuming table " + tableName + " does not exist");
+            e.printStackTrace();
+            return false;
+        }
+    }
+
+    /**
+     * Test table status by writing a test value and reading it back.
+     * @param tableName
+     * @return
+     */
+    protected boolean isWritable(String tableName) {
+        String readBack = null;
+        String testData = "test";
+        String testId = "test_id";
+        // sample write
+        Map<String, AttributeValue> dbData = new HashMap<String, AttributeValue>();
+        dbData.put("id", new AttributeValue().withS(testId));
+        dbData.put("data", new AttributeValue().withS(testData));
+        dbData.put("lastmodified", new AttributeValue()
+                .withN(Long.toString(System.currentTimeMillis(), 10)));
+
+        PutItemRequest putRequest = new PutItemRequest()
+                .withTableName(tableName)
+                .withItem(dbData);
+        try {
+            dynamo.putItem(putRequest);
+        } catch (AmazonClientException e) {
+            log.info("Test put to " + tableName + " failed, wait and try again");
+        }
+
+        // sample read
+        GetItemRequest request = new GetItemRequest()
+                .withTableName(tableName)
+                .withKey(new Key().withHashKeyElement(new AttributeValue().withS(testId)));
+        request = request.withConsistentRead(true);
+
+        GetItemResult getResult = null;
+        try {
+            getResult = dynamo.getItem(request);
+        } catch (AmazonClientException e) {
+            log.info("Test get from " + tableName + " failed, wait and try again");
+        }
+        if (getResult != null &&
+                getResult.getItem() != null &&
+                getResult.getItem().get("data") != null) {
+            readBack = getResult.getItem().get("data").getS();
+        }
+
+        if (testData.equals(readBack)) {
+            log.info("Successfully read back data from " + tableName);
+            return true;
+        }
+        return false;
+
+    }
     /**
      * Dynamically calculate the provisioned capacity for new or retiring tables
      * @param readOnly - used when a table is rotated into 'previous table' position.
@@ -328,6 +388,8 @@ public class DynamoTableRotator {
                     dynamo.deleteTable(dtr);
                 } catch (ResourceInUseException e) {
                     log.info("Table is already being deleted by another server/thread.");
+                } catch (ResourceNotFoundException e) {
+                    log.info("Table has already been deleted by another server/thread.");
                 } catch (Exception e) {
                     log.severe("Failed to delete expired table " + tableName);
                     log.severe(e.toString());

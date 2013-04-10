@@ -149,4 +149,56 @@ public class DynamoTableRotatorTest {
         assertEquals("test_id", result.getItem().get("id").getS());
         assertEquals("test", result.getItem().get("data").getS());
     }
+
+    @Test
+    public void isActive() throws Exception {
+        // bit of a circular test!
+        String testTableName = rotator.createCurrentTableName(System.currentTimeMillis()/1000);
+        rotator.ensureTable(testTableName, 10000);
+        assertTrue(rotator.isActive(testTableName));
+    }
+
+    @Test
+    public void isWritable() throws Exception {
+        // bit of a circular test!
+        String testTableName = rotator.createCurrentTableName(System.currentTimeMillis()/1000);
+        rotator.ensureTable(testTableName, 10000);
+        assertTrue(rotator.isWritable(testTableName));
+    }
+
+    @Test
+    public void init_previousExists() throws Exception {
+        // Check that we pick up an active table that is from a previous time period
+        long nowSeconds = System.currentTimeMillis()/1000;
+        long twoTablesAgo = nowSeconds - 2*rotator.maxInactiveInterval;
+
+        String oldTableName = rotator.createCurrentTableName(twoTablesAgo);
+        rotator.ensureTable(oldTableName, 10000);
+
+        rotator.init(nowSeconds);
+        assertEquals(oldTableName, rotator.currentTableName);
+    }
+
+    @Test
+    public void init_currentExists() throws Exception {
+        // Check that we pick up an active table that is from the current time period
+        long nowSeconds = System.currentTimeMillis()/1000;
+
+        String tableName = rotator.createCurrentTableName(nowSeconds);
+        rotator.ensureTable(tableName, 10000);
+
+        rotator.init(nowSeconds);
+        assertEquals(tableName, rotator.currentTableName);
+    }
+
+    @Test
+    public void init_noneExists() throws Exception {
+        // Check that we create and wait for a new table if none exists
+        long nowSeconds = System.currentTimeMillis()/1000;
+
+        String tableName = rotator.createCurrentTableName(nowSeconds);
+
+        rotator.init(nowSeconds);
+        assertEquals(tableName, rotator.currentTableName);
+    }
 }

@@ -618,10 +618,8 @@ public class DynamoManager implements Manager, Lifecycle {
             getDynamo();
             this.rotator = new DynamoTableRotator(getTableBaseName(), getMaxInactiveInterval(), getRequestsPerSecond(),
                     getSessionSize(), getEventualConsistency(), getDynamo());
-            String firstTable = rotator.createCurrentTableName(nowSeconds);
-            log.info("initializing first table: " + firstTable);
-            rotator.ensureTable(firstTable, DynamoTableRotator.CREATE_TABLE_HEADROOM_SECONDS * 2000);
-            rotator.currentTableName = firstTable;
+            rotator.init(nowSeconds); // set current table, will wait for a table to come online if we need to create
+                                      // a new one.
 
             log.info("Connected to Dynamo for session storage. Session live time = "
                     + (getMaxInactiveInterval()) + "s");
