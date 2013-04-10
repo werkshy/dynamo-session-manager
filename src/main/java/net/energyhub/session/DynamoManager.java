@@ -508,7 +508,7 @@ public class DynamoManager implements Manager, Lifecycle {
             }
 
             long t1 = System.currentTimeMillis();
-            log.info("Loaded session id " + id + " in " + (t1-t0) + "ms, "
+            log.fine("Loaded session id " + id + " in " + (t1-t0) + "ms, "
                     + result.getConsumedCapacityUnits() + " read units");
             if (statsdClient != null) {
                 statsdClient.time("session.load", t0, t1);
@@ -519,11 +519,14 @@ public class DynamoManager implements Manager, Lifecycle {
             log.severe(e.getMessage());
             throw e;
         } catch (ResourceNotFoundException e) {
-            log.log(Level.SEVERE, "Unable to deserialize session ", e);
+            log.severe("Unable to deserialize session (table not found) ");
+            e.printStackTrace();
+            log.info("Calling backgroundProcess again");
             backgroundProcess(); // try to speed up processing
             throw e;
         } catch (ClassNotFoundException ex) {
-            log.log(Level.SEVERE, "Unable to deserialize session ", ex);
+            log.severe("Unable to deserialize session (class not found)");
+            ex.printStackTrace();
             throw new IOException("Unable to deserializeInto session", ex);
         }
     }
