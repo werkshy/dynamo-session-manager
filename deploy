@@ -2,6 +2,9 @@
 
 set -e
 
+echo "Removing existing dynamo jar"
+rm -f /usr/share/tomcat6/lib/dynamo*jar
+
 echo "Copying jars to tomcat lib dir"
 cp target/dynamo-session-manager-*.jar target/lib/
 cp target/lib/* /usr/share/tomcat6/lib/
