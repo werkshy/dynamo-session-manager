@@ -460,10 +460,15 @@ public class DynamoManager implements Manager, Lifecycle {
                 currentSession.remove();
             }
         }
+
+        String currentTable = "", previousTable = null;
+
         try {
-            log.fine("Loading session " + id + " from Dynamo");
+            currentTable = rotator.getCurrentTableName();
+            previousTable = rotator.getPreviousTableName();
+            log.fine("Loading session " + id + " from Dynamo, current = " + currentTable);
             GetItemRequest request = new GetItemRequest()
-                    .withTableName(rotator.getCurrentTableName())
+                    .withTableName(currentTable)
                     .withKey(new Key().withHashKeyElement(new AttributeValue().withS(id)));
             // set eventual consistency or fully consistent
             request = request.withConsistentRead(!eventualConsistency);
@@ -473,14 +478,14 @@ public class DynamoManager implements Manager, Lifecycle {
             // if not found in the current table, we look in the previous table
             if (result == null || result.getItem() == null && rotator.getPreviousTableName() != null) {
                 try {
-                    log.fine("Falling back to previous table: " + rotator.getPreviousTableName());
-                    request = request.withTableName(rotator.getPreviousTableName());
+                    log.fine("Falling back to previous table: " + previousTable);
+                    request = request.withTableName(previousTable);
                     result = getDynamo().getItem(request);
                 } catch (ResourceNotFoundException e) {
                     // Occasionally, the table we call 'previous' has actually been deleted by another process
                     // In that case we are *just about* to delete it anyway, PLUS, this session is not in our
                     // current active table, it is presumably a new session request.
-                    log.warning("Tried to lookup session in deleted table (presumably): " + rotator.getPreviousTableName());
+                    log.warning("Tried to lookup session in deleted table (presumably): " + previousTable);
                 }
             }
 
@@ -526,7 +531,7 @@ public class DynamoManager implements Manager, Lifecycle {
             log.severe(e.getMessage());
             throw e;
         } catch (ResourceNotFoundException e) {
-            log.severe("Unable to deserialize session (table not found) ");
+            log.severe("Unable to deserialize session (table not found) " + currentTable);
             e.printStackTrace();
             log.info("Calling backgroundProcess again");
             backgroundProcess(); // try to speed up processing
@@ -541,7 +546,8 @@ public class DynamoManager implements Manager, Lifecycle {
     public void save(Session session) throws IOException {
         long t0 = System.currentTimeMillis();
         try {
-            log.fine("Saving session " + session + " into Dynamo");
+            String currentTable = rotator.getCurrentTableName();
+            log.fine("Saving session " + session + " into Dynamo (" + currentTable + ")");
 
             StandardSession standardsession = (DynamoSession) session;
 
@@ -561,7 +567,7 @@ public class DynamoManager implements Manager, Lifecycle {
             dbData.put("data", new AttributeValue().withB(data));
             dbData.put("lastmodified", new AttributeValue().withN(Long.toString(System.currentTimeMillis(), 10)));
 
-            PutItemRequest putRequest = new PutItemRequest().withTableName(rotator.getCurrentTableName()).withItem(dbData);
+            PutItemRequest putRequest = new PutItemRequest().withTableName(currentTable).withItem(dbData);
             PutItemResult result = getDynamo().putItem(putRequest);
 
             long t1 = System.currentTimeMillis();

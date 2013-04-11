@@ -201,4 +201,18 @@ public class DynamoTableRotatorTest {
         rotator.init(nowSeconds);
         assertEquals(tableName, rotator.currentTableName);
     }
+
+    @Test
+    public void isMyTable() {
+        long nowSeconds = System.currentTimeMillis()/1000;
+
+        String tableName = rotator.createCurrentTableName(nowSeconds);
+        String fakeTableName = "some-other-base_" + rotator.dateFormat.format(nowSeconds);
+        String almostTableName = rotator.tableBaseName + "-extra_" + rotator.dateFormat.format(nowSeconds);
+
+        assertTrue(rotator.isMyTable(tableName));
+        assertFalse(rotator.isMyTable(fakeTableName));
+        assertFalse(rotator.isMyTable(almostTableName));
+
+    }
 }

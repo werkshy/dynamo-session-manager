@@ -24,6 +24,7 @@ import com.amazonaws.AmazonClientException;
 import com.amazonaws.services.dynamodb.AmazonDynamoDB;
 import com.amazonaws.services.dynamodb.model.*;
 
+import java.text.ParseException;
 import java.text.SimpleDateFormat;
 import java.util.*;
 import java.util.concurrent.Semaphore;
@@ -47,6 +48,7 @@ import java.util.logging.Logger;
 public class DynamoTableRotator {
     private static Logger log = Logger.getLogger("net.energyhub.session.DynamoTableRotator");
     public static final long CREATE_TABLE_HEADROOM_SECONDS = 60;
+    public static final String TABLE_DATE_FORMAT = "yyyyMMdd_HHmmss";
 
     protected AmazonDynamoDB dynamo;
     protected String tableBaseName;
@@ -57,7 +59,8 @@ public class DynamoTableRotator {
     protected String currentTableName;
     protected String previousTableName;
     protected Semaphore semaphore;
-    protected SimpleDateFormat dateFormat = new SimpleDateFormat("yyyyMMdd_HHmmss");
+
+    protected SimpleDateFormat dateFormat = new SimpleDateFormat(TABLE_DATE_FORMAT);
 
     public DynamoTableRotator(String tableBaseName, Integer maxInactiveInterval, Integer requestsPerSecond,
                               Integer sessionSize, Boolean eventualConsistency, AmazonDynamoDB dynamo) {
@@ -381,7 +384,7 @@ public class DynamoTableRotator {
         Set<String> tablesToKeep = new HashSet<String>(Arrays.asList(currentTableName, previousTableName,
                 nextTableName));
         for (String tableName : tableNames) {
-            if (tableName.startsWith(tableBaseName) && !tablesToKeep.contains(tableName)) {
+            if (isMyTable(tableName) && !tablesToKeep.contains(tableName)) {
                 try {
                     log.info("Deleting expired table: " + tableName);
                     DeleteTableRequest dtr = new DeleteTableRequest().withTableName(tableName);
@@ -396,6 +399,25 @@ public class DynamoTableRotator {
                 }
             }
         }
+    }
+
+    /**
+     * Check that the basename matches the given tablename (and that we're not greedily grabbing a table with a
+     * same-but-longer basename.
+     * e.g. one cluster is using 'tomcat-sessions' and another using 'tomcat-sessions-beta'
+     * @param tableName
+     * @return
+     */
+    protected boolean isMyTable(String tableName) {
+        if (!tableName.startsWith(tableBaseName)) {
+            return false;
+        }
+
+        // Otherwise, let's make triple-sure that the table isn't base-table-SOMETHINGELSE-20130413...
+        if (tableName.length() == tableBaseName.length() +  TABLE_DATE_FORMAT.length() + 1) {
+            return true;
+        }
+        return false;
     }
 
     /**
