@@ -99,7 +99,9 @@ public class DynamoTableRotator {
             if (isActive(tableName)) {
                 // Triple-check the table works before using it
                 ensureTable(tableName, DynamoTableRotator.CREATE_TABLE_HEADROOM_SECONDS*2000);
-                currentTableName = tableName;
+                synchronized (this) {
+                    currentTableName = tableName;
+                }
                 log.info("Found and used active table " + tableName + " from " + i + " periods ago");
                 return;
             }
@@ -109,7 +111,9 @@ public class DynamoTableRotator {
         String firstTable = createCurrentTableName(nowSeconds);
         // If first table does not exist, go back and look for a previous table
         ensureTable(firstTable, DynamoTableRotator.CREATE_TABLE_HEADROOM_SECONDS * 2000);
-        currentTableName = firstTable;
+        synchronized (this) {
+            currentTableName = firstTable;
+        }
     }
 
     /**
