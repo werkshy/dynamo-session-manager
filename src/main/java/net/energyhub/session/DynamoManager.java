@@ -472,9 +472,16 @@ public class DynamoManager implements Manager, Lifecycle {
 
             // if not found in the current table, we look in the previous table
             if (result == null || result.getItem() == null && rotator.getPreviousTableName() != null) {
-                log.fine("Falling back to previous table: " + rotator.getPreviousTableName());
-                request = request.withTableName(rotator.getPreviousTableName());
-                result = getDynamo().getItem(request);
+                try {
+                    log.fine("Falling back to previous table: " + rotator.getPreviousTableName());
+                    request = request.withTableName(rotator.getPreviousTableName());
+                    result = getDynamo().getItem(request);
+                } catch (ResourceNotFoundException e) {
+                    // Occasionally, the table we call 'previous' has actually been deleted by another process
+                    // In that case we are *just about* to delete it anyway, PLUS, this session is not in our
+                    // current active table, it is presumably a new session request.
+                    log.warning("Tried to lookup session in deleted table (presumably): " + rotator.getPreviousTableName());
+                }
             }
 
             if (result == null || result.getItem() == null) {
