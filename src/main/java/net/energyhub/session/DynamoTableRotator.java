@@ -358,25 +358,7 @@ public class DynamoTableRotator {
             previousTableName = targetPreviousTableName;
         }
 
-        downProvision(previousTableName);
-
         removeExpiredTables(tableNames, nowSeconds);
-    }
-
-    protected void downProvision(String tableName) {
-        try {
-            // after rotation, the old table can be set to read-only to save $$$
-            ProvisionedThroughput throughput = getProvisionedThroughputObject(true);
-            log.info("Reprovisioning the previous table to read-only: " + tableName + ", " + throughput);
-            UpdateTableRequest updateTableRequest = new UpdateTableRequest().withTableName(tableName)
-                    .withProvisionedThroughput(throughput);
-            dynamo.updateTable(updateTableRequest);
-        } catch (ResourceInUseException e) {
-            log.info("Table is already being downprovisioned by another server/thread.");
-        } catch (Exception e) {
-            log.severe("Failed to down-provision table " + tableName);
-            log.severe(e.toString());
-        }
     }
 
     /**
