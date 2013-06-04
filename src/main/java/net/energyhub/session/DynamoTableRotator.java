@@ -308,6 +308,15 @@ public class DynamoTableRotator {
 
     }
 
+    /**
+     * Help calculate provisioned capacity
+     *
+     * @param kbPerUnit the kilobyte capacity of one unit (as of writing, this
+     *                  is 4kb for reads, 1kb for writes)
+     * @param requestsPerSecond expected request volume
+     * @param sessionSize session size in kilobytes
+     * @return how many strongly-consistent units should be provisioned
+     */
     private long calculateUnitsRequired(short kbPerUnit, int requestsPerSecond, int sessionSize) {
         double unitsPerSessionRequest = Math.ceil((float) sessionSize / (float) kbPerUnit);
         return (long) (requestsPerSecond * unitsPerSessionRequest);
@@ -322,7 +331,6 @@ public class DynamoTableRotator {
         // TODO: bump up requestsPerSecond if we start seeing ProvisionedThroughputExceededExceptions
 
         long readUnit = calculateUnitsRequired(KBS_PER_READ_UNIT, requestsPerSecond, sessionSize);
-        // by default, we need the same write throughput as read throughput (one read, one write per request).
         long writeUnit = calculateUnitsRequired(KBS_PER_WRITE_UNIT, requestsPerSecond, sessionSize);
         if (readOnly) {
             writeUnit = 1L;   // minimum is 1 unit, and we won't be writing to old tables.
