@@ -59,11 +59,15 @@ public class DynamoTableRotatorTest {
     public void testGetProvisionedThroughputObject() throws Exception {
         assertFalse(this.eventualConsistency);
         ProvisionedThroughput pt_rw = rotator.getProvisionedThroughputObject(false);
-        assertEquals(requestsPerSecond*sessionSize, pt_rw.getReadCapacityUnits().longValue());
-        assertEquals(requestsPerSecond * sessionSize, pt_rw.getWriteCapacityUnits().longValue());
+        long readsPerSession = (long) Math.ceil(Float.valueOf(sessionSize) /
+                                                Float.valueOf(DynamoTableRotator.KBS_PER_READ_UNIT));
+        long writesPerSession = (long) Math.ceil(Float.valueOf(sessionSize) /
+                Float.valueOf(DynamoTableRotator.KBS_PER_WRITE_UNIT));
+        assertEquals(readsPerSession * requestsPerSecond, pt_rw.getReadCapacityUnits().longValue());
+        assertEquals(writesPerSession * requestsPerSecond, pt_rw.getWriteCapacityUnits().longValue());
 
         ProvisionedThroughput pt_ro = rotator.getProvisionedThroughputObject(true);
-        assertEquals(requestsPerSecond*sessionSize, pt_ro.getReadCapacityUnits().longValue());
+        assertEquals(readsPerSession * requestsPerSecond, pt_ro.getReadCapacityUnits().longValue());
         assertEquals(1L, pt_ro.getWriteCapacityUnits().longValue());
     }
 

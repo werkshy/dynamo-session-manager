@@ -24,7 +24,6 @@ import com.amazonaws.AmazonClientException;
 import com.amazonaws.services.dynamodb.AmazonDynamoDB;
 import com.amazonaws.services.dynamodb.model.*;
 
-import java.text.ParseException;
 import java.text.SimpleDateFormat;
 import java.util.*;
 import java.util.concurrent.Semaphore;
@@ -49,6 +48,8 @@ public class DynamoTableRotator {
     private static Logger log = Logger.getLogger("net.energyhub.session.DynamoTableRotator");
     public static final long CREATE_TABLE_HEADROOM_SECONDS = 60;
     public static final String TABLE_DATE_FORMAT = "yyyyMMdd_HHmmss";
+    public static final short KBS_PER_READ_UNIT = 4;
+    public static final short KBS_PER_WRITE_UNIT = 1;
 
     protected AmazonDynamoDB dynamo;
     protected String tableBaseName;
@@ -306,19 +307,25 @@ public class DynamoTableRotator {
         return false;
 
     }
+
+    private long calculateUnitsRequired(short kbPerUnit, int requestsPerSecond, int sessionSize) {
+        double unitsPerSessionRequest = Math.ceil((float) sessionSize / (float) kbPerUnit);
+        return (long) (requestsPerSecond * unitsPerSessionRequest);
+    }
+
     /**
      * Dynamically calculate the provisioned capacity for new or retiring tables
      * @param readOnly - used when a table is rotated into 'previous table' position.
      * @return
      */
     protected ProvisionedThroughput getProvisionedThroughputObject(boolean readOnly) {
-        // TODO: bump up requestsPerSecond if we start seeing
-        // ProvisionedThroughputExceededExceptions
-        long readUnit = requestsPerSecond*sessionSize;
+        // TODO: bump up requestsPerSecond if we start seeing ProvisionedThroughputExceededExceptions
+
+        long readUnit = calculateUnitsRequired(KBS_PER_READ_UNIT, requestsPerSecond, sessionSize);
         // by default, we need the same write throughput as read throughput (one read, one write per request).
-        long writeUnit = readUnit;
+        long writeUnit = calculateUnitsRequired(KBS_PER_WRITE_UNIT, requestsPerSecond, sessionSize);
         if (readOnly) {
-            writeUnit = 1L;   // minimun is 1 unit, and we won't be writing to old tables.
+            writeUnit = 1L;   // minimum is 1 unit, and we won't be writing to old tables.
         }
         // eventual consistency reads are two-for-the-price-of-one
         if (eventualConsistency) {
