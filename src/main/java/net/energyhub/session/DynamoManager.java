@@ -508,7 +508,6 @@ public class DynamoManager implements Manager, Lifecycle {
             log.fine("Deserialized session in " + (t3-t2) + "ms");
 
             session.setMaxInactiveInterval(-1);
-            session.access();
             session.setValid(true);
             session.setNew(false);
 
@@ -549,21 +548,22 @@ public class DynamoManager implements Manager, Lifecycle {
             String currentTable = rotator.getCurrentTableName();
             log.fine("Saving session " + session + " into Dynamo (" + currentTable + ")");
 
-            StandardSession standardsession = (DynamoSession) session;
+            DynamoSession dynamoSession = (DynamoSession) session;
+            dynamoSession.setLastAccessedTime(System.currentTimeMillis());
 
             if (logSessionContents && log.isLoggable(Level.FINE)) {
                 log.fine("Session Contents [" + session.getId() + "]:");
-                for (Object name : Collections.list(standardsession.getAttributeNames())) {
+                for (Object name : Collections.list(dynamoSession.getAttributeNames())) {
                     log.fine("  " + name);
                 }
             }
 
             long t2 = System.currentTimeMillis();
-            ByteBuffer data = serializer.serializeFrom(standardsession);
+            ByteBuffer data = serializer.serializeFrom(dynamoSession);
             long t3 = System.currentTimeMillis();
             log.fine("Serialized session in " + (t3-t2) + "ms");
             Map<String, AttributeValue> dbData = new HashMap<String, AttributeValue>();
-            dbData.put("id", new AttributeValue().withS(standardsession.getIdInternal()));
+            dbData.put("id", new AttributeValue().withS(dynamoSession.getIdInternal()));
             dbData.put("data", new AttributeValue().withB(data));
             dbData.put("lastmodified", new AttributeValue().withN(Long.toString(System.currentTimeMillis(), 10)));
 

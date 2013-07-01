@@ -68,4 +68,9 @@ public class DynamoSession extends StandardSession {
     public AttributeValue getAttributeValue() {
         return new AttributeValue().withS(this.id);
     }
+
+    public void setLastAccessedTime(long accessTime) {
+        this.thisAccessedTime = accessTime;
+        this.lastAccessedTime = accessTime;
+    }
 }
