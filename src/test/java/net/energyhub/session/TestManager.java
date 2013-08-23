@@ -4,6 +4,7 @@ import static org.mockito.Mockito.*;
 
 import com.amazonaws.services.dynamodb.AmazonDynamoDB;
 import org.apache.catalina.Container;
+import org.apache.catalina.Context;
 import org.apache.catalina.Pipeline;
 import org.apache.catalina.Valve;
 import org.apache.juli.logging.Log;
@@ -15,7 +16,7 @@ import java.util.ArrayList;
 /** Test dynamo manager to inject alternator
  */
 public class TestManager extends DynamoManager {
-    private static Log log = LogFactory.getLog(TestManager.class);
+    private static Log logger = LogFactory.getLog(TestManager.class);
     private AmazonDynamoDB dbClient;
 
     public TestManager(AmazonDynamoDB dbClient) {
@@ -32,12 +33,12 @@ public class TestManager extends DynamoManager {
      */
     @Override
     public Container getContainer() {
-        Container container = mock(Container.class);
+        Container container = mock(Container.class, withSettings().extraInterfaces(Context.class));
         Pipeline pipeline = mock(Pipeline.class);
         when(pipeline.getValves()).thenReturn(new Valve[]{});
         when(container.getPipeline()).thenReturn(pipeline);
 
-        when(container.getLogger()).thenReturn(log);
+        when(container.getLogger()).thenReturn(logger);
         return container;
     }
 

@@ -6,12 +6,18 @@
 
     <groupId>net.energyhub</groupId>
     <artifactId>dynamo-session-manager</artifactId>
-    <version>1.8.2</version>
+    <version>1.9.0</version>
     <parent>
         <groupId>org.sonatype.oss</groupId>
         <artifactId>oss-parent</artifactId>
         <version>7</version>
     </parent>
+
+    <properties>
+        <aws-sdk.version>2.4</aws-sdk.version>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <tomcat.version>6.0.37</tomcat.version>
+    </properties>
     <scm>
         <connection>scm:git:git@github.com:werkshy/dynamo-session-manager.git</connection>
         <developerConnection>scm:git:git@github.com:werkshy/dynamo-session-manager.git</developerConnection>
@@ -32,9 +38,16 @@
         <dependency>
             <groupId>org.apache.tomcat</groupId>
             <artifactId>catalina</artifactId>
-            <version>6.0.35</version>
+            <version>${tomcat.version}</version>
             <type>jar</type>
             <scope>provided</scope>
+        </dependency>
+        <dependency> <!-- Required for mocking some tomcat classes -->
+            <groupId>org.apache.tomcat</groupId>
+            <artifactId>coyote</artifactId>
+            <version>${tomcat.version}</version>
+            <type>jar</type>
+            <scope>test</scope>
         </dependency>
         <dependency>
           <groupId>com.esotericsoftware.kryo</groupId>
@@ -114,8 +127,4 @@
             </plugin>
         </plugins>
     </build>
-    <properties>
-        <aws-sdk.version>2.4</aws-sdk.version>
-        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-    </properties>
 </project>
