@@ -150,8 +150,8 @@ public class DynamoTableRotatorTest {
 
         GetItemResult result = dynamo.getItem(request);
         assertNotNull(result);
-        assertEquals("test_id", result.getItem().get("id").getS());
-        assertEquals("test", result.getItem().get("data").getS());
+        assertEquals("test_id", result.getItem().get(DynamoManager.COLUMN_ID).getS());
+        assertEquals("test", result.getItem().get(DynamoManager.COLUMN_DATA).getS());
     }
 
     @Test

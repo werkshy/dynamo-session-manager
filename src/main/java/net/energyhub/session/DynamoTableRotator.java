@@ -186,7 +186,7 @@ public class DynamoTableRotator {
     protected void createTable(String tableName) {
         log.info("Creating table " + tableName);
         // define schema: primary string index on id
-        KeySchemaElement primary = new KeySchemaElement().withAttributeName("id").withAttributeType(ScalarAttributeType.S);
+        KeySchemaElement primary = new KeySchemaElement().withAttributeName(DynamoManager.COLUMN_ID).withAttributeType(ScalarAttributeType.S);
         KeySchema schema = new KeySchema()
                 .withHashKeyElement(primary);
 
@@ -268,9 +268,9 @@ public class DynamoTableRotator {
         String testId = "test_id";
         // sample write
         Map<String, AttributeValue> dbData = new HashMap<String, AttributeValue>();
-        dbData.put("id", new AttributeValue().withS(testId));
-        dbData.put("data", new AttributeValue().withS(testData));
-        dbData.put("lastmodified", new AttributeValue()
+        dbData.put(DynamoManager.COLUMN_ID, new AttributeValue().withS(testId));
+        dbData.put(DynamoManager.COLUMN_DATA, new AttributeValue().withS(testData));
+        dbData.put(DynamoManager.COLUMN_LAST_ACCESSED, new AttributeValue()
                 .withN(Long.toString(System.currentTimeMillis(), 10)));
 
         PutItemRequest putRequest = new PutItemRequest()
@@ -296,8 +296,8 @@ public class DynamoTableRotator {
         }
         if (getResult != null &&
                 getResult.getItem() != null &&
-                getResult.getItem().get("data") != null) {
-            readBack = getResult.getItem().get("data").getS();
+                getResult.getItem().get(DynamoManager.COLUMN_DATA) != null) {
+            readBack = getResult.getItem().get(DynamoManager.COLUMN_DATA).getS();
         }
 
         if (testData.equals(readBack)) {

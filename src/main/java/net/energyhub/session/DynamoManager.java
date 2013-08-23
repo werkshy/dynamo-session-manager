@@ -54,6 +54,10 @@ public class DynamoManager implements Manager, Lifecycle {
     protected static String statsdHost = "";
     protected static int statsdPort = 8125;
 
+    public static final String COLUMN_ID = "id";
+    public static final String COLUMN_LAST_ACCESSED = "lastAccessed";
+    public static final String COLUMN_DATA = "data";
+
     protected AmazonDynamoDB dynamo;
     protected DynamoTableRotator rotator;
     private DynamoSessionTrackerValve trackerValve;
