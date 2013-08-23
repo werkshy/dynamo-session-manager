@@ -51,7 +51,7 @@ we recommend at least an hour.</td></tr>
 <tr><td>ignoreHeaders</td><td>Optional, if the request has a header name matching this regex, the session will not be saved to Dynamo.</td></tr>
 <tr><td>statsdHost</td><td>Optional, if set we will send statistics to <a href="https://github.com/etsy/statsd/">statsd</a> about session size and request timing</td></tr>
 <tr><td>statsdPort</td><td>Optional, set the port for statsd (default is 8125)</td></tr>
-
+<tr><td>logSessionContents</td><td>If true, log the session attributes on load and save (at FINE level)</td></tr>
 </table>
 
 Set backgroundProcessDelay to a small number (usually in server.xml)
