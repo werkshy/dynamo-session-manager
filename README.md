@@ -1,6 +1,12 @@
 Tomcat Dynamo Session Manager
 ============================
 
+Deprecated Fork
+---------------
+
+I have left EnergyHub, so development of d-s-m is being continued by [Mark Whitney](https://github.com/kramimus/dynamo-session-manager)
+
+
 Overview
 --------
 
